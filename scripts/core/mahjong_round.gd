@@ -64,6 +64,11 @@ var flowers: Array[String] = []
 ## 桃花：连续「摸什么打什么」的连击数（断掉归零）
 var combo_streak: int = 0
 var _claim_broke_streak: bool = false   # 碰 / 杠 之后的打出必然打断连击
+## 紫罗兰：换牌时弃掉的牌。不进牌河、不给分，也不会再回到牌墙里。
+var swapped: Array[int] = []
+var _swap_window: bool = false   # 「这一关开局」的换牌窗口开着没（一关只开一次）
+## 刚换进来的牌理完牌之后排在下标几，界面拿它播入场动画
+var swap_positions: Array[int] = []
 var draw_serial: int = 0           # 摸牌次数（含杠后补摸），界面靠它判断该不该播摸牌动画
 var score: int = 0                 # 本局得分
 var score_from_discards: int = 0   # 其中「打出」贡献的部分
@@ -113,6 +118,9 @@ func start(seed_value: int = 0, preset: Array = [], level_value: int = 1) -> voi
 	score_from_win = 0
 	last_score_gain = 0
 	last_score_reason = ""
+	swapped = []
+	_swap_window = false
+	swap_positions = []
 	_ai_discards_pending = 0
 	_ai_discards_shown_from = 0
 
@@ -127,6 +135,7 @@ func start(seed_value: int = 0, preset: Array = [], level_value: int = 1) -> voi
 
 	# 第一巡不摸牌，直接打出一张
 	state = State.DISCARDING
+	_swap_window = true   # 紫罗兰：一关（回合）只有开局这一次换牌机会
 	changed.emit()
 
 
@@ -140,6 +149,7 @@ func draw_tile() -> int:
 	## 用掉一次换牌机会，摸一张牌；如果这 14 张能和牌就立刻结算。
 	if not can_draw():
 		return -1
+	_swap_window = false   # 摸了牌，这一关的换牌机会就过去了
 	var tile := wall.draw()
 	if tile < 0:
 		_finish(false, "牌墙摸空了")
@@ -169,6 +179,7 @@ func discard(index: int) -> int:
 	## 打出一张牌。玩家打完之后才轮到电脑出牌。
 	if state != State.DISCARDING:
 		return -1
+	_swap_window = false   # 打出去之后这一关的换牌机会就过去了
 	# 打的是不是刚摸到的那张？（要在拿走之前判断）
 	var from_draw := hand.has_drawn() and index == hand.tiles.size()
 	var tile := hand.take(index)
@@ -431,6 +442,87 @@ func flower_extra_tours() -> int:
 	return STAR_FLOWER_EXTRA_TOURS if has_flower("star") else 0
 
 
+# ---------------------------------------------------------------- 紫罗兰：每关（回合）开局换牌
+
+func can_swap() -> bool:
+	## 紫罗兰：每个回合（每关）开局、还没摸牌也没打牌的时候，
+	## 可以弃掉手里若干张，再从牌墙摸等量的新牌。一个回合只有这一次机会。
+	return has_flower("violet") and _swap_window
+
+
+func swap_tiles(indices: Array) -> int:
+	## 弃掉指定的这几张，再摸同样多的牌，手牌张数不变。
+	## 弃掉的牌不进牌河（不算打出的牌、不给分），但也不会再回到牌墙里。
+	## 返回实际换了几张（牌墙不够时可能比选得少）。
+	if not can_swap():
+		return 0
+	var picked: Array[int] = []
+	var seen := {}
+	for value in indices:
+		var index := int(value)
+		if index < 0 or index >= hand.tiles.size() or seen.has(index):
+			continue
+		seen[index] = true
+		picked.append(index)
+	if picked.is_empty():
+		return 0
+	picked.sort()
+
+	# 先把新牌摸出来：这样牌墙快见底时也只是少换几张，手牌张数不会变少
+	var replacements: Array[int] = []
+	for i in picked.size():
+		var tile := wall.draw()
+		if tile < 0:
+			break
+		replacements.append(tile)
+	if replacements.is_empty():
+		return 0
+
+	# 从后往前删，免得下标错位
+	for i in range(replacements.size() - 1, -1, -1):
+		var index: int = picked[i]
+		swapped.append(hand.tiles[index])
+		hand.tiles.remove_at(index)
+
+	# 重新理牌，同时记下新牌最后落在哪几个位置（同种的旧牌排在前面），
+	# 界面照着这几个位置播「刚摸进来」的入场动画。
+	var merged: Array = []
+	for tile in hand.tiles:
+		merged.append({"kind": tile, "fresh": false})
+	for tile in replacements:
+		merged.append({"kind": tile, "fresh": true})
+	merged.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if a["kind"] != b["kind"]:
+			return a["kind"] < b["kind"]
+		return b["fresh"] and not a["fresh"])
+	hand.tiles.clear()
+	swap_positions = []
+	for i in merged.size():
+		hand.tiles.append(merged[i]["kind"])
+		if merged[i]["fresh"]:
+			swap_positions.append(i)
+
+	_swap_window = false   # 一个回合（一关）只换这一次，换几张都一样
+	_check_heavenly_after_swap()
+	changed.emit()
+	return replacements.size()
+
+
+func _check_heavenly_after_swap() -> void:
+	## 换牌之后手里依旧是庄家开局那 14 张，所以照样可以凑成天胡
+	if tour != 1 or is_over():
+		return
+	if hand.tiles.size() != START_HAND_SIZE or hand.has_drawn():
+		return
+	if not WinChecker.is_winning_hand(hand.tiles):
+		return
+	winning_tile = -1
+	_award_win_score("天胡", HEAVENLY_SCORE_MULTIPLIER)
+	result_text = _win_text("天胡 · %s" % WinChecker.describe_win(hand.tiles))
+	state = State.WON
+	finished.emit(true, result_text)
+
+
 func _concealed_kong_kind() -> int:
 	var counts := WinChecker.to_counts(hand.all_tiles())
 	for kind in TileCodec.KIND_COUNT:
@@ -604,6 +696,10 @@ func visible_count(kind: int) -> int:
 	for meld in melds:
 		if meld["kind"] == kind:
 			seen += meld_tile_count(meld)
+	# 紫罗兰换牌弃掉的牌不在牌河里，但确实已经出了场，算进「露面」才对得上实际张数
+	for tile in swapped:
+		if tile == kind:
+			seen += 1
 	for tile in discards:
 		if tile == kind:
 			seen += 1

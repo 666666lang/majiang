@@ -16,18 +16,27 @@ const ACTION_INK := UiStyle.ACTION_INK
 const ACTION_LIGHT := UiStyle.ACTION_LIGHT
 const AI_DISCARD_DELAY := 0.45  # 电脑两张牌之间的间隔（秒）
 const DEAL_DELAY := 0.1         # 发牌时每张牌之间的间隔（秒）
-const OPPONENT_HAND_SIZE := 13  # 别家手牌张数（纯装饰）
-## 三家的牌用同一款，宽高比跟真牌一样（约 0.7），左右两家旋转 90 度
-const OPPONENT_TILE := Vector2(30, 43)
+## 对家牌河贴顶的留白
+const ACROSS_POOL_TOP := 8.0
 ## 牌河里的牌比手牌小一圈，四家的牌河才摆得下
 const POOL_TILE := Vector2(26, 37)
 ## 听牌提示那一行的高度：一开始不显示，但位置要一直占着，免得出现的时候版面跳
 const HINT_SLOT_HEIGHT := 30.0
-## 副露（碰、杠）那一行的位置和大小：同样一直占着，出现副露时不推版面
-const MELD_SLOT_HEIGHT := 66.0
-const MELD_TILE := Vector2(44, 60)  # 比手牌小一圈，一眼能分出哪些是碰杠的
+## 版面尺寸：左右边距、牌桌和分数牌之间的距离、分数牌宽度
+## （副露并到手牌那一行之后，分数牌收窄了一点，把位置让给牌）
+const PANEL_MARGIN := 28.0
+const TABLE_SEPARATION := 18.0
+const SCOREBOARD_WIDTH := 210.0
+## 手牌之间的缝、摸到的那张和手牌之间的缝、手牌和副露之间的缝
+const TILE_GAP := 4.0
+const DRAWN_GAP := 20.0
+const MELD_GAP := 18.0
+## 牌桌最上面那行「买到的花牌」：跟手牌一样大，
+## 高度一直占着（哪怕一张都没买），这样买第一张花牌时版面不会跳
+const FLOWER_TILE := TileWidget.TILE_SIZE
+const FLOWER_STRIP_HEIGHT := 100.0
 ## 按钮在屏幕中线之上再抬这么高，跟自己的牌河拉开距离
-const ACTION_RAISE := 48.0
+const ACTION_RAISE := 24.0
 
 var round_: MahjongRound
 var ai_discard_delay: float = AI_DISCARD_DELAY  # 测试里会调成 0
@@ -44,11 +53,11 @@ var _remain_value: Label
 var _target_value: Label
 var _score_value: Label
 var _tile_row: HBoxContainer
-var _meld_row: HBoxContainer
+var _row_scale: float = 1.0     # 手牌 + 副露这一行放不下时整体缩一点
+var _flower_row: HBoxContainer
 var _hint_label: Label
 var _action_row: HBoxContainer
 var _center: Control
-var _across_row: HBoxContainer
 var _my_pool: DiscardPool
 var _across_pool: DiscardPool
 var _left_pool: DiscardPool
@@ -59,6 +68,9 @@ var _ron_button: Button
 var _pong_button: Button
 var _kong_button: Button
 var _concealed_kong_button: Button
+var _swap_button: Button
+var _swap_confirm_button: Button
+var _swap_cancel_button: Button
 var _pass_button: Button
 var _settle_panel: PanelContainer
 var _settle_title: Label
@@ -88,6 +100,8 @@ var _run_bonus := {"wan": 0, "tong": 0, "tiao": 0, "honor": 0}
 var _owned_flowers: Array[String] = []    # 本局买到的花牌（按图片名，花牌只卖一次）
 var _settled_round: MahjongRound = null  # 已经结过算的那一局，防止重复发银两
 var _hint_discards: Array = []            # 这一手打出去能听牌的牌
+var _swap_mode: bool = false              # 紫罗兰：正在挑要弃掉的牌
+var _swap_selection: Array[int] = []      # 挑中的手牌下标
 
 
 func _ready() -> void:
@@ -171,7 +185,7 @@ func _build_ui() -> void:
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_%s" % side, 28)
+		margin.add_theme_constant_override("margin_%s" % side, int(PANEL_MARGIN))
 	add_child(margin)
 
 	var column := VBoxContainer.new()
@@ -181,7 +195,7 @@ func _build_ui() -> void:
 	# ---- 牌桌 + 右侧分数牌 ----
 	var main_row := HBoxContainer.new()
 	main_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	main_row.add_theme_constant_override("separation", 18)
+	main_row.add_theme_constant_override("separation", int(TABLE_SEPARATION))
 	column.add_child(main_row)
 
 	# 左列：牌桌 + 自己的手牌（手牌跟牌桌同宽，不会伸到分数牌下面）
@@ -191,14 +205,26 @@ func _build_ui() -> void:
 	play_column.add_theme_constant_override("separation", 12)
 	main_row.add_child(play_column)
 
-	# 牌桌：三家的手牌做背景，中央放牌河和按钮
+	# 牌桌最上面一行：本局买到的花牌，就摆在这儿
+	var flower_slot := Control.new()
+	flower_slot.custom_minimum_size = Vector2(0.0, FLOWER_STRIP_HEIGHT)
+	flower_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	play_column.add_child(flower_slot)
+	var flower_wrap := CenterContainer.new()
+	flower_wrap.set_anchors_preset(Control.PRESET_FULL_RECT)
+	flower_wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flower_slot.add_child(flower_wrap)
+	_flower_row = HBoxContainer.new()
+	_flower_row.add_theme_constant_override("separation", 6)
+	_flower_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flower_wrap.add_child(_flower_row)
+
+	# 牌桌：只留四家的牌河，中央自己算坐标摆牌河和按钮
 	var table := HBoxContainer.new()
 	table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	table.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	table.add_theme_constant_override("separation", 14)
 	play_column.add_child(table)
-
-	table.add_child(_make_side_wall(PI * 0.5))  # 上家（左）
 
 	# 中央区域自己算坐标：四家牌河要按座位方向摆，容器排不出来
 	_center = Control.new()
@@ -206,13 +232,6 @@ func _build_ui() -> void:
 	_center.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_center.resized.connect(_layout_table)
 	table.add_child(_center)
-
-	# 对家的手牌
-	_across_row = HBoxContainer.new()
-	_across_row.add_theme_constant_override("separation", 0)  # 牌与牌紧靠，不留缝
-	_center.add_child(_across_row)
-	for i in OPPONENT_HAND_SIZE:
-		_across_row.add_child(_make_back_tile(OPPONENT_TILE))
 
 	# 四家牌河：朝向分别是 自己 / 对面 / 上家 / 下家
 	_my_pool = _make_pool(0.0)
@@ -231,6 +250,15 @@ func _build_ui() -> void:
 	_action_row.add_child(_draw_button)
 	_discard_button = _make_action_button("打出", _on_discard_pressed, ACTION_GOLD, ACTION_INK)
 	_action_row.add_child(_discard_button)
+	# 紫罗兰：每关开局换牌（按钮平时都藏着，能用的时候才出现）
+	_swap_button = _make_action_button("换牌", _on_swap_pressed, ACTION_SLATE, ACTION_LIGHT)
+	_action_row.add_child(_swap_button)
+	_swap_confirm_button = _make_action_button("确认换牌", _on_swap_confirm_pressed,
+		ACTION_GOLD, ACTION_INK)
+	_action_row.add_child(_swap_confirm_button)
+	_swap_cancel_button = _make_action_button("取消", _on_swap_cancel_pressed,
+		ACTION_SLATE, ACTION_LIGHT)
+	_action_row.add_child(_swap_cancel_button)
 	_ron_button = _make_action_button("荣和", _on_ron_pressed, ACTION_RED, ACTION_LIGHT)
 	_action_row.add_child(_ron_button)
 	_kong_button = _make_action_button("杠", _on_kong_pressed, ACTION_RED, ACTION_LIGHT)
@@ -241,7 +269,6 @@ func _build_ui() -> void:
 	_action_row.add_child(_concealed_kong_button)
 	_pass_button = _make_action_button("过", _on_pass_pressed, ACTION_SLATE, ACTION_LIGHT)
 	_action_row.add_child(_pass_button)
-	table.add_child(_make_side_wall(-PI * 0.5))  # 下家（右）
 	main_row.add_child(_build_scoreboard())
 	_build_settlement()
 
@@ -266,47 +293,8 @@ func _build_ui() -> void:
 	var row_wrap := CenterContainer.new()
 	hand_box.add_child(row_wrap)
 	_tile_row = HBoxContainer.new()
-	_tile_row.add_theme_constant_override("separation", 4)
+	_tile_row.add_theme_constant_override("separation", int(TILE_GAP))
 	row_wrap.add_child(_tile_row)
-
-	# 碰过 / 杠过的牌单独一行，放在手牌下面，免得手牌被挤窄
-	var meld_slot := Control.new()
-	meld_slot.custom_minimum_size = Vector2(0.0, MELD_SLOT_HEIGHT)
-	meld_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hand_box.add_child(meld_slot)
-	_meld_row = HBoxContainer.new()
-	_meld_row.add_theme_constant_override("separation", 0)  # 跟牌河一样紧靠不留缝
-	_meld_row.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_meld_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_meld_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	meld_slot.add_child(_meld_row)
-
-
-func _make_side_wall(rotated: float) -> Control:
-	## 左右两家的一排手牌：13 张背面朝上，竖着排，纯背景。
-	var wall := VBoxContainer.new()
-	wall.alignment = BoxContainer.ALIGNMENT_CENTER
-	wall.add_theme_constant_override("separation", 0)  # 牌与牌紧靠，不留缝
-	wall.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for i in OPPONENT_HAND_SIZE:
-		wall.add_child(_make_back_tile(OPPONENT_TILE, rotated))
-	return wall
-
-
-func _make_back_tile(tile_size: Vector2, rotated: float = 0.0) -> Control:
-	var tile := TileWidget.new()
-	tile.setup_back(tile_size)
-	if is_zero_approx(rotated):
-		return tile
-	# 侧边的牌是竖着摆的：外面套一层壳负责占位，牌本体绕自己的中心转 90 度
-	var wrapper := Control.new()
-	wrapper.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	wrapper.custom_minimum_size = Vector2(tile_size.y, tile_size.x)
-	tile.rotation = rotated
-	tile.pivot_offset = tile_size * 0.5
-	tile.position = (wrapper.custom_minimum_size - tile_size) * 0.5
-	wrapper.add_child(tile)
-	return wrapper
 
 
 func _make_pool(facing: float) -> DiscardPool:
@@ -318,7 +306,7 @@ func _make_pool(facing: float) -> DiscardPool:
 
 
 func _layout_table() -> void:
-	## 中央区域是手动排的：对家手牌贴顶，我的牌河贴底，左右两家牌河贴两侧，
+	## 中央区域是手动排的：对家牌河贴顶，我的牌河贴底，左右两家牌河贴两侧，
 	## 按钮放在中间偏上一点。
 	if _center == null:
 		return
@@ -327,15 +315,12 @@ func _layout_table() -> void:
 		return
 	var cx := area.x * 0.5
 
-	_across_row.size = _across_row.get_combined_minimum_size()
-	_across_row.position = Vector2(cx - _across_row.size.x * 0.5, 0.0)
-
 	var pool_size := _my_pool.size            # 牌河未旋转时的尺寸
 	var depth := pool_size.y                  # 牌河朝中心方向的深度
 	var across_depth := pool_size.x           # 旋转 90 度后视觉上的深度
 
-	# 对家：紧贴自己手牌的下方，往中心长
-	_across_pool.position = Vector2(cx - pool_size.x * 0.5, _across_row.size.y + 8.0)
+	# 对家：贴顶，往中心长
+	_across_pool.position = Vector2(cx - pool_size.x * 0.5, ACROSS_POOL_TOP)
 	# 自己：紧贴区域底部，往中心长（就在自己手牌上方）
 	_my_pool.position = Vector2(cx - pool_size.x * 0.5, area.y - pool_size.y)
 	# 上家、下家：贴左右两侧，垂直居中
@@ -396,7 +381,7 @@ func _make_action_button(text: String, handler: Callable, base: Color, text_colo
 func _build_scoreboard() -> PanelContainer:
 	## 右侧常驻的分数牌：当前巡 / 剩余巡 / 目标分数 / 当前得分
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(236, 0)
+	panel.custom_minimum_size = Vector2(SCOREBOARD_WIDTH, 0)
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL  # 跟牌桌一样高，做成一条侧栏
 	var style := StyleBoxFlat.new()
 	style.bg_color = UiStyle.PANEL
@@ -620,6 +605,13 @@ func _build_flower_slot(index: int) -> Dictionary:
 	tile.setup_flower("")
 	wrap.add_child(tile)
 
+	# 稀有度单独占一行小标签：普通花牌是空的一行，位置一直留着，
+	# 两种花牌的槽位高度才一样
+	var rarity := _make_label("", 13, EPIC)
+	rarity.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rarity.custom_minimum_size = Vector2(0.0, 18.0)
+	box.add_child(rarity)
+
 	var name_label := _make_label("花牌", 15, DIM)
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(name_label)
@@ -636,25 +628,39 @@ func _build_flower_slot(index: int) -> Dictionary:
 		ACTION_GOLD, ACTION_INK, Vector2(150, 46))
 	box.add_child(buy)
 	return {
-		"root": panel, "tile": tile, "name": name_label, "effect": effect,
+		"root": panel, "tile": tile, "rarity": rarity, "name": name_label, "effect": effect,
 		"price": price, "buy": buy, "flower": {},
 	}
 
 
 func _roll_flowers() -> void:
 	## 第一行摆花牌：目录里有几张图就随机抽两张
+	var full := _owned_flowers.size() >= FlowerTiles.LIMIT
 	var flowers := FlowerTiles.roll(2, null, _owned_flowers)
 	for i in _flower_slots.size():
 		var slot: Dictionary = _flower_slots[i]
 		var tile: TileWidget = slot["tile"]
+		var rarity: Label = slot["rarity"]
 		var name_label: Label = slot["name"]
 		var effect: Label = slot["effect"]
 		var price: Label = slot["price"]
 		var buy: Button = slot["buy"]
+		if full:
+			# 花牌带满了：这一行不再摆货
+			slot["flower"] = {}
+			slot["bought"] = false
+			tile.setup_flower("")
+			rarity.text = ""
+			name_label.text = "花牌已满"
+			effect.text = "一局最多带 %d 张" % FlowerTiles.LIMIT
+			price.text = "—"
+			buy.disabled = true
+			continue
 		if i >= flowers.size():
 			slot["flower"] = {}
 			slot["bought"] = false
 			tile.setup_flower("")
+			rarity.text = ""
 			if _owned_flowers.is_empty():
 				name_label.text = "还没有花牌图片"
 				effect.text = "放进 assets/tiles/flowers/"
@@ -668,13 +674,11 @@ func _roll_flowers() -> void:
 		slot["flower"] = flower
 		slot["bought"] = false
 		tile.setup_flower(flower["path"])
-		# 史诗花牌名字后面带个标签，一眼看出不是普通货
-		if FlowerTiles.is_epic(flower["id"]):
-			name_label.text = "%s · 史诗" % flower["id"]
-			name_label.add_theme_color_override("font_color", EPIC)
-		else:
-			name_label.text = flower["id"]
-			name_label.add_theme_color_override("font_color", DIM)
+		# 名字就是名字，稀有度单独写在上面的小标签里
+		var epic := FlowerTiles.is_epic(flower["id"])
+		rarity.text = "史诗" if epic else ""
+		name_label.text = flower["id"]
+		name_label.add_theme_color_override("font_color", EPIC if epic else DIM)
 		var desc := FlowerTiles.effect_desc(flower["id"])
 		effect.text = desc if desc != "" else "效果待定"
 		_update_flower_slot(i)
@@ -694,9 +698,13 @@ func _update_flower_slot(index: int) -> void:
 		return
 	var id: String = flower["id"]
 	price.text = "%d 两" % FlowerTiles.price(id)
+	price.add_theme_color_override("font_color",
+		EPIC if FlowerTiles.is_epic(id) else GOLD)
 	# 效果还没登记的花牌先不让买，免得花冤枉钱
 	var key := FlowerTiles.effect_key(id)
-	buy.disabled = key == "" or Settings.coins < FlowerTiles.price(id)
+	# 带满了也不给买
+	var full := _owned_flowers.size() >= FlowerTiles.LIMIT
+	buy.disabled = key == "" or Settings.coins < FlowerTiles.price(id) or full
 
 
 func _on_buy_flower_pressed(index: int) -> void:
@@ -705,6 +713,8 @@ func _on_buy_flower_pressed(index: int) -> void:
 	var slot: Dictionary = _flower_slots[index]
 	var flower: Dictionary = slot["flower"]
 	if flower.is_empty() or slot["bought"]:
+		return
+	if _owned_flowers.size() >= FlowerTiles.LIMIT:
 		return
 	var key := FlowerTiles.effect_key(flower["id"])
 	var cost := FlowerTiles.price(flower["id"])
@@ -909,6 +919,51 @@ func _on_discard_pressed() -> void:
 	_do_discard(_selected_index)
 
 
+func _on_swap_pressed() -> void:
+	## 紫罗兰：进入「挑要弃掉的牌」模式
+	if not round_.can_swap():
+		return
+	_swap_mode = true
+	_swap_selection.clear()
+	_selected_index = -1
+	_has_selection = false
+	_refresh()
+
+
+func _on_swap_cancel_pressed() -> void:
+	_exit_swap_mode()
+	_refresh()
+
+
+func _on_swap_confirm_pressed() -> void:
+	if not _swap_mode or _swap_selection.is_empty():
+		return
+	var count := round_.swap_tiles(_swap_selection)
+	var positions := round_.swap_positions.duplicate()
+	_exit_swap_mode()
+	_refresh()
+	if count > 0:
+		_play_swap_animation(positions)
+
+
+func _play_swap_animation(positions: Array) -> void:
+	## 换进来的牌跟开局发牌一样从上面落下来：一张一张，每张相差 0.1 秒，落一张响一声
+	var order := 0
+	for index in _tile_row.get_child_count():
+		var child := _tile_row.get_child(index)
+		if not (child is TileWidget) or not positions.has(index):
+			continue
+		var delay := order * DEAL_DELAY
+		order += 1
+		child.play_deal(delay)
+		_play_sound_later(delay, "draw")
+
+
+func _exit_swap_mode() -> void:
+	_swap_mode = false
+	_swap_selection.clear()
+
+
 func _on_ron_pressed() -> void:
 	round_.declare_ron()
 
@@ -955,6 +1010,14 @@ func _on_pass_pressed() -> void:
 
 
 func _on_tile_pressed(index: int) -> void:
+	if _swap_mode:
+		# 换牌模式：点一下选中、再点一下取消，可以多选
+		if _swap_selection.has(index):
+			_swap_selection.erase(index)
+		else:
+			_swap_selection.append(index)
+		_refresh()
+		return
 	if round_.state != MahjongRound.State.DISCARDING:
 		return
 	if _has_selection and _selected_index == index:
@@ -1010,6 +1073,7 @@ func _refresh() -> void:
 	_combo_row.visible = round_.has_flower("combo")
 	if _combo_row.visible:
 		_combo_value.text = "×%d" % maxi(1, round_.combo_streak)
+	_rebuild_flowers()
 	_rebuild_tiles()
 	_rebuild_pools()
 	_layout_table()
@@ -1018,8 +1082,17 @@ func _refresh() -> void:
 	# 按钮只在该做决定的时候出现：该摸牌就只给摸牌，该打牌就只给打出
 	var state := round_.state
 	var claiming := state == MahjongRound.State.CLAIM
-	_draw_button.visible = state == MahjongRound.State.READY
-	_discard_button.visible = state == MahjongRound.State.DISCARDING
+	# 换牌窗口已经关了（比如刚摸完牌）就退出换牌模式，免得停在半路上
+	if _swap_mode and not round_.can_swap():
+		_exit_swap_mode()
+	_swap_button.visible = round_.can_swap() and not _swap_mode
+	_swap_confirm_button.visible = _swap_mode
+	_swap_cancel_button.visible = _swap_mode
+	_swap_confirm_button.disabled = _swap_selection.is_empty()
+	_swap_confirm_button.text = "确认换牌（%d）" % _swap_selection.size()
+	# 挑牌的时候先别给摸牌 / 打出，免得两件事搅在一起
+	_draw_button.visible = state == MahjongRound.State.READY and not _swap_mode
+	_discard_button.visible = state == MahjongRound.State.DISCARDING and not _swap_mode
 	_ron_button.visible = claiming and round_.can_ron
 	_kong_button.visible = claiming and round_.can_kong
 	# 能杠的时候就不给碰了，杠优先
@@ -1033,6 +1106,7 @@ func _refresh() -> void:
 
 
 func _rebuild_tiles() -> void:
+	## 手牌 + 副露同占一行
 	for child in _tile_row.get_children():
 		_tile_row.remove_child(child)
 		child.queue_free()
@@ -1045,7 +1119,7 @@ func _rebuild_tiles() -> void:
 		_tile_row.add_child(_make_tile(index, round_.hand.tiles[index], false, index == win_index))
 
 	if round_.hand.has_drawn():
-		_add_gap(20)
+		_add_gap(DRAWN_GAP)
 		var drawn := _make_tile(count, round_.hand.drawn_tile, true)
 		_tile_row.add_child(drawn)
 		# 刚摸进来的那张要有入场动画，但要避免每次刷新都重播
@@ -1056,20 +1130,38 @@ func _rebuild_tiles() -> void:
 			drawn.play_draw()
 			Sfx.play("draw")
 
-	# 无条件重建：副露可能在上一关还存在，这一关已经清空了，
-	# 不重建的话旧牌会留在画面上。
-	_rebuild_melds()
-
-
-func _rebuild_melds() -> void:
-	for child in _meld_row.get_children():
-		_meld_row.remove_child(child)
-		child.queue_free()
-	var first := true
+	# 副露（碰 / 杠）就排在自家手牌右边、同一行里，砖头大小跟手牌一模一样。
+	# 每一副之间留一道缝，一副里面几张紧靠，跟牌河一个道理。
 	for meld in round_.melds:
-		first = false
+		_add_gap(MELD_GAP)
 		for i in round_.meld_tile_count(meld):
-			_meld_row.add_child(_make_meld_tile(meld["kind"], meld.get("concealed", false)))
+			_tile_row.add_child(_make_meld_tile(meld["kind"], meld.get("concealed", false)))
+
+	_fit_tile_row()
+
+
+func _fit_tile_row() -> void:
+	## 手牌和副露现在同占一行，牌多了会顶到右边的分数牌。
+	## 这里量一下这一行自然要多宽，放不下就整行等比缩一点（放得下就不动）。
+	var natural := _tile_row.get_combined_minimum_size().x
+	var room := get_viewport_rect().size.x - PANEL_MARGIN * 2.0 - SCOREBOARD_WIDTH - TABLE_SEPARATION
+	_row_scale = clampf(room / maxf(natural, 1.0), 0.5, 1.0)
+	if _row_scale >= 0.999:
+		return
+	for child in _tile_row.get_children():
+		if child is TileWidget:
+			child.set_tile_size(TileWidget.TILE_SIZE * _row_scale, 0.09)
+
+
+func _rebuild_flowers() -> void:
+	## 牌桌最上面那一行：本局买到的花牌照原样摆出来
+	for child in _flower_row.get_children():
+		_flower_row.remove_child(child)
+		child.queue_free()
+	for id in _owned_flowers:
+		var tile := TileWidget.new()
+		tile.setup_flower(FlowerTiles.path_of(id), FLOWER_TILE)
+		_flower_row.add_child(tile)
 
 
 func _add_gap(width: int) -> void:
@@ -1082,7 +1174,8 @@ func _make_tile(index: int, kind: int, drawn: bool, highlight: bool = false) -> 
 	var widget := TileWidget.new()
 	widget.setup(kind, drawn)
 	widget.set_hinted(_hint_discards.has(kind))
-	widget.set_selected(highlight or (_has_selection and _selected_index == index))
+	widget.set_selected(highlight or _swap_selection.has(index)
+		or (_has_selection and _selected_index == index))
 	widget.pressed.connect(_on_tile_pressed.bind(index))
 	return widget
 
@@ -1090,7 +1183,6 @@ func _make_tile(index: int, kind: int, drawn: bool, highlight: bool = false) -> 
 func _make_meld_tile(kind: int, concealed: bool = false) -> TileWidget:
 	var widget := TileWidget.new()
 	widget.setup(kind, false, false, true)
-	widget.set_tile_size(MELD_TILE)
 	widget.set_concealed(concealed)
 	widget.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return widget
@@ -1106,6 +1198,17 @@ func _update_hint() -> void:
 
 func _setup_debug_shot() -> void:
 	var args := OS.get_cmdline_user_args()
+	# 「假装买过花牌」是前置状态，跟后面选哪种画面可以叠加
+	if "--owned" in args:
+		for entry in FlowerTiles.available():
+			if _owned_flowers.size() >= FlowerTiles.LIMIT:
+				break
+			_owned_flowers.append(entry["id"])
+			round_.flowers.append(FlowerTiles.effect_key(entry["id"]))
+		if "--full" in args:
+			# 凑满上限，用来看商店「花牌已满」的样子
+			while _owned_flowers.size() < FlowerTiles.LIMIT:
+				_owned_flowers.append("占位%d" % _owned_flowers.size())
 	if "--rig" in args:
 		# 听牌很多的牌，检查提示文字很长时排版会不会乱
 		round_.hand.reset([0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33])
@@ -1229,12 +1332,21 @@ func _setup_debug_shot() -> void:
 		round_.discard(round_.hand.tiles.size())
 		round_.run_opponent_turn()
 		round_.draw_tile()
+	elif "--violet" in args:
+		# 买了紫罗兰。再加 --pick 就直接进换牌模式，选两张看界面
+		round_.flowers.assign(["violet"])
+		if "--pick" in args:
+			_on_swap_pressed()
+			_on_tile_pressed(0)
+			_on_tile_pressed(2)
+			if "--confirm" in args:
+				_on_swap_confirm_pressed()   # 截在换牌动画演到一半的时候
 	elif "--draw" in args:
 		_debug_skip_first_tour()
 		round_.draw_tile()
 	# 有动画正在播的模式不要再刷新，否则刚建好的牌会被重建、动画白做
 	var keeps_animation := "--draw" in args or "--konged" in args \
-		or "--ankonged" in args or "--ai" in args
+		or "--ankonged" in args or "--ai" in args or "--confirm" in args
 	if not keeps_animation:
 		_refresh()
 	if "--hover" in args:

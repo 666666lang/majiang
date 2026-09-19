@@ -8,10 +8,11 @@ extends RefCounted
 const DIR := "res://assets/tiles/flowers/"
 const PRICE := 10        # 普通花牌
 const EPIC_PRICE := 14   # 史诗花牌，效果更强所以更贵
+const LIMIT := 5         # 一局最多带 5 张花牌
 const EXTS := [".png", ".webp", ".jpg", ".jpeg"]
 
 ## 史诗花牌：售价 14 两，商店里会标出来
-const EPIC_IDS := ["满天星"]
+const EPIC_IDS := ["满天星", "紫罗兰"]
 
 ## 花牌效果登记表：左边是文件名（去掉扩展名），右边是效果代号。
 ## 效果代号按「效果」命名、不跟花名绑：以后换图、或者加一张同效果的花牌，代码都不用动。
@@ -23,12 +24,15 @@ const EFFECT_KEYS := {
 	"hehua": "repeat",
 	"满天星": "star",
 	"mantianxing": "star",
+	"紫罗兰": "violet",
+	"ziluolan": "violet",
 }
 ## 效果代号对应的说明文字（也给商店显示用）
 const EFFECT_DESCS := {
 	"combo": "连续打出刚摸到的牌 → 该张 ×连击数",
 	"repeat": "打出时牌河已有同样的牌 → 该张 ×5",
 	"star": "每关额外增加 3 巡",
+	"violet": "每关开始可弃牌摸等量",
 }
 
 ## 图片最长边超过这个值就先缩下来。原图动辄 1300×2000，
@@ -91,6 +95,14 @@ static func price(id: String) -> int:
 
 static func rarity_name(id: String) -> String:
 	return "史诗" if is_epic(id) else "普通"
+
+
+static func path_of(id: String) -> String:
+	## 按花牌名字找图片路径；找不到就返回空字符串（牌面留白，不报错）
+	for entry in available():
+		if entry["id"] == id:
+			return entry["path"]
+	return ""
 
 
 static func available() -> Array:

@@ -34,6 +34,7 @@ func _run() -> void:
 	_test_pong()
 	_test_kong()
 	_test_concealed_kong()
+	_test_violet_swap()
 	_test_scoring()
 	_test_seeded_round_is_deterministic()
 	await _test_ui_scene_smoke()
@@ -61,6 +62,31 @@ func _check_eq(actual: Variant, expected: Variant, name: String) -> void:
 	else:
 		_failed += 1
 		print("  [FAIL] %s  实际=%s  期望=%s" % [name, str(actual), str(expected)])
+
+
+func _count_melds(instance: Node) -> int:
+	## 副露现在跟手牌同占一行，数「带副露标记的牌」就是副露张数
+	var row: Node = instance.get("_tile_row")
+	if row == null:
+		return 0
+	var count := 0
+	for child in row.get_children():
+		if child.get("is_melded") == true:
+			count += 1
+	return count
+
+
+func _meld_matches_hand_size(instance: Node) -> bool:
+	## 副露的牌得跟手牌一样大
+	var row: Node = instance.get("_tile_row")
+	var hand_size: Vector2 = Vector2.ZERO
+	var meld_size: Vector2 = Vector2.ZERO
+	for child in row.get_children():
+		if child.get("is_melded") == true:
+			meld_size = child.custom_minimum_size
+		elif child.get("kind") != null and hand_size == Vector2.ZERO:
+			hand_size = child.custom_minimum_size
+	return hand_size != Vector2.ZERO and hand_size == meld_size
 
 
 func _parse_hand(text: String) -> Array[int]:
@@ -377,6 +403,10 @@ func _test_shop() -> void:
 	_check_eq(FlowerTilesS.price("满天星"), 14, "史诗花牌卖 14 两")
 	_check_eq(FlowerTilesS.price("桃花"), 10, "普通花牌还是 10 两")
 	_check_eq(FlowerTilesS.price("荷花"), 10, "普通花牌还是 10 两")
+	_check_eq(FlowerTilesS.LIMIT, 5, "一局最多带 5 张花牌")
+	var peach_path := FlowerTilesS.path_of("桃花")
+	_check(peach_path != "" and peach_path.contains("桃花"), "按名字能找到花牌的图片")
+	_check_eq(FlowerTilesS.path_of("没这张花"), "", "找不到的花牌给空路径，不报错")
 
 	# 花牌要在 start() 之前登记
 	var star := MahjongRoundS.new()
@@ -711,6 +741,93 @@ func _test_concealed_kong() -> void:
 	_check_eq(flowery.score, 10 + 240 + 3000, "合计 = 打出 10 + 暗杠 240 + 胡牌 3000")
 
 
+func _test_violet_swap() -> void:
+	print("紫罗兰：每关（回合）开局换牌")
+	_check_eq(FlowerTilesS.effect_key("紫罗兰"), "violet", "紫罗兰登记了「开局换牌」效果")
+	_check(FlowerTilesS.is_epic("紫罗兰"), "紫罗兰是史诗花牌")
+	_check_eq(FlowerTilesS.price("紫罗兰"), 14, "史诗花牌卖 14 两")
+
+	# 没买就没有这个能力
+	var plain := MahjongRoundS.new()
+	plain.start(1, [], 1)
+	_check(not plain.can_swap(), "没买紫罗兰就没有换牌")
+	_check_eq(plain.swap_tiles([0]), 0, "没买的时候换了也不生效")
+
+	var round_ := MahjongRoundS.new()
+	round_.flowers.assign(["violet"])
+	round_.start(1, [], 1)
+	_check(round_.can_swap(), "买了紫罗兰，开局（第一巡）就能换牌")
+	_check_eq(round_.hand.tiles.size(), 14, "庄家起手 14 张")
+
+	# 弃两张、摸两张：手牌张数不变，牌进的是「弃置区」不是牌河
+	var picked: Array = [round_.hand.tiles.size() - 1, round_.hand.tiles.size() - 2]
+	var picked_kinds: Array = [round_.hand.tiles[picked[0]], round_.hand.tiles[picked[1]]]
+	var seen_before := round_.visible_count(picked_kinds[0])
+	var wall_before := round_.wall.remaining()
+	var count := round_.swap_tiles(picked)
+	_check_eq(count, 2, "换了两张")
+	_check_eq(round_.hand.tiles.size(), 14, "换完手里还是 14 张")
+	_check_eq(round_.wall.remaining(), wall_before - 2, "牌墙少了两张（换来的）")
+	_check_eq(round_.discards.size(), 0, "弃掉的牌不进牌河")
+	_check_eq(round_.ai_discards.size(), 0, "也不算电脑打出的牌")
+	_check_eq(round_.swapped.size(), 2, "弃掉的牌记在弃置区里")
+	_check_eq(round_.score, 0, "换牌不给分")
+	_check_eq(round_.visible_count(picked_kinds[0]), seen_before,
+		"露面张数不变：牌只是从手上挪到弃置区，不会再回来")
+	_check(not round_.can_swap(), "一巡只能换一次")
+
+	# 换进来的牌要能被界面认出来是哪几张（好播入场动画）
+	var anim := MahjongRoundS.new()
+	anim.flowers.assign(["violet"])
+	anim.start(1, [], 1)
+	anim.hand.reset(_parse_hand("1123m 4567p 1234s 12z"))
+	anim.wall.stack_next(13, 0)   # 换进来的第一张是五筒
+	_check_eq(anim.swap_tiles([anim.hand.tiles.find(12)]), 1, "弃掉四筒换来五筒")
+	_check_eq(anim.swap_positions, [5] as Array[int],
+		"新牌排在同种旧牌后面：五筒落在第 6 张（下标 5）")
+	_check_eq(anim.hand.tiles[5], 13, "这个位置确实是新换来的五筒")
+
+	# 一回合 = 一关：换过之后，这一关剩下的巡都不能再换
+	round_.discard(0)
+	round_.run_opponent_turn()
+	_check_eq(round_.tour, 2, "进第二巡")
+	_check(not round_.can_swap(), "换牌是按「回合」算的，进了下一巡也不能再换")
+	round_.draw_tile()
+	_check(not round_.can_swap(), "摸了牌当然也不能换")
+	_check_eq(round_.swap_tiles([0]), 0, "摸完牌再换不生效")
+	# 一路打到这一关结束，中途都不能再换
+	var guard := 0
+	while not round_.is_over() and guard < 40:
+		if round_.can_draw():
+			_check(not round_.can_swap(), "第 %d 巡也不能换" % round_.tour)
+			round_.draw_tile()
+		round_.discard(0)
+		round_.run_opponent_turn()
+		guard += 1
+	_check(round_.is_over(), "这一关打完了")
+	_check_eq(round_.swapped.size(), 2, "整关下来只换了开局那一次")
+
+	# 下一个回合（下一关）开局，机会又有了
+	var next_round := MahjongRoundS.new()
+	next_round.flowers.assign(["violet"])
+	next_round.start(3, [], 2)
+	_check(next_round.can_swap(), "新的一关（回合）开局又能换牌")
+
+	# 换牌之后依旧可以天胡：弃掉三筒、换来一筒，正好凑成将
+	var heavenly := MahjongRoundS.new()
+	heavenly.flowers.assign(["violet"])
+	heavenly.start(1, _parse_hand("123m 456m 789m 999p 13p"), 1)
+	_check_eq(heavenly.state, MahjongRoundS.State.DISCARDING, "起手不是成牌，正常等打牌")
+	heavenly.wall.stack_next(9, 0)   # 换进来的第一张是一筒
+	_check_eq(heavenly.swap_tiles([heavenly.hand.tiles.find(11)]), 1, "弃掉三筒换来一筒")
+	_check_eq(heavenly.state, MahjongRoundS.State.WON, "换完凑成 14 张成牌 → 天胡")
+	_check_eq(heavenly.result_text, "天胡 · 4 面子 + 1 将 · 过关（6720 分）",
+		"换牌之后照样算天胡")
+	_check_eq(heavenly.score, 6720, "天胡分不变：（14 张 × 10 分）× 48")
+	_check_eq(heavenly.discards.size(), 0, "换掉的那张不进牌河")
+	_check_eq(heavenly.swapped, [11] as Array[int], "弃置区里记着三筒")
+
+
 func _test_scoring() -> void:
 	print("计分")
 	_check_eq(TileCodecS.base_score(0), 10, "每张牌基础分是 10 分")
@@ -915,9 +1032,11 @@ func _test_ui_scene_smoke() -> void:
 			# 进入新一关时，上一关的副露不能留在画面上
 			round_ref.melds.append({"kind": 0, "kong": false})
 			instance.call("_refresh")
-			_check_eq(instance.get("_meld_row").get_child_count(), 3, "界面：有副露时画出三张")
+			_check_eq(_count_melds(instance), 3, "界面：有副露时画出三张")
+			_check_eq(_meld_matches_hand_size(instance), true,
+				"界面：副露跟手牌同占一行，大小也一样")
 			instance.call("_start_new_round")
-			_check_eq(instance.get("_meld_row").get_child_count(), 0, "界面：进新一关要清空副露")
+			_check_eq(_count_melds(instance), 0, "界面：进新一关要清空副露")
 
 			# 金币：过关继续累计，失败重开清零
 			var settings := root.get_node_or_null("Settings")
@@ -964,5 +1083,59 @@ func _test_ui_scene_smoke() -> void:
 			_check_eq(round_ref.total_tours, LevelTableS.tours(2) + 3, "界面：第 2 关变成 13 巡")
 			_check_eq(round_ref.flowers.has("star"), true, "界面：花牌效果带进了新一关")
 			_check_eq(instance.get("_remain_value").text, "12 巡", "界面：分数牌上写 12 巡")
+
+			# 紫罗兰：界面上得能挑牌换牌
+			var owned: Array = instance.get("_owned_flowers")
+			owned.append("紫罗兰")
+			round_ref.state = MahjongRoundS.State.WON
+			instance.call("_on_restart_pressed")
+			round_ref = instance.get("round_")
+			_check_eq(instance.get("_swap_button").visible, true, "界面：有紫罗兰就出现「换牌」按钮")
+			instance.call("_on_swap_pressed")
+			_check_eq(instance.get("_swap_confirm_button").visible, true, "界面：进了换牌模式")
+			_check_eq(instance.get("_draw_button").visible, false, "界面：挑牌的时候先不给摸牌")
+			var hand_before: int = round_ref.hand.tiles.size()
+			instance.call("_on_tile_pressed", 0)
+			instance.call("_on_tile_pressed", 1)
+			_check_eq(instance.get("_swap_selection").size(), 2, "界面：可以多选")
+			_check_eq(instance.get("_swap_confirm_button").text, "确认换牌（2）", "界面：按钮上写着选了几张")
+			instance.call("_on_swap_confirm_pressed")
+			_check_eq(round_ref.hand.tiles.size(), hand_before, "界面：换完手牌张数不变")
+			_check_eq(round_ref.discards.size(), 0, "界面：换掉的牌不进牌河")
+			_check_eq(instance.get("_swap_mode"), false, "界面：换完自动退出换牌模式")
+			_check_eq(instance.get("_swap_button").visible, false, "界面：这一巡换过了，按钮收起")
+			# 换进来的牌要走跟开局发牌一样的入场动画（从上方落下）
+			var row: Node = instance.get("_tile_row")
+			var falling := 0
+			for index in round_ref.swap_positions:
+				var tile: Node = row.get_child(index)
+				# 不写成 TileWidget 类型判断：那会把主场景的类拉进来，
+				# 而无窗口跑测试时 Sfx 这些 autoload 还没注册，编译会挂
+				var stack: Variant = tile.get("_stack")
+				if stack != null and stack.offset_top < 0.0:
+					falling += 1
+			_check_eq(falling, round_ref.swap_positions.size(),
+				"界面：换进来的牌都在往下落（入场动画）")
+
+			# 买过的花牌要摆在牌桌最上面那一行
+			owned.append("荷花")
+			instance.call("_refresh")
+			var flower_row: Node = instance.get("_flower_row")
+			_check_eq(flower_row.get_child_count(), owned.size(), "界面：买过的花牌摆在牌桌顶上那一行")
+			_check_eq(flower_row.get_child(0).custom_minimum_size,
+				instance.get("_tile_row").get_child(0).custom_minimum_size,
+				"界面：牌桌上花牌跟手牌一样大")
+
+			# 花牌上限 5 张
+			while owned.size() < FlowerTilesS.LIMIT:
+				owned.append("占位%d" % owned.size())
+			instance.call("_roll_flowers")
+			var full_slot: Dictionary = instance.get("_flower_slots")[0]
+			_check_eq(full_slot["name"].text, "花牌已满", "界面：带满 5 张之后商店不再摆花牌")
+			full_slot["flower"] = {"id": "桃花", "path": "", "epic": false}
+			full_slot["bought"] = false
+			var coins_before: int = settings.coins
+			instance.call("_on_buy_flower_pressed", 0)
+			_check_eq(settings.coins, coins_before, "界面：带满 5 张之后点了也买不进来")
 
 	instance.free()
