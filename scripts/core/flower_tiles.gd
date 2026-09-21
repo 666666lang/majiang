@@ -11,7 +11,7 @@ const EPIC_PRICE := 14   # 史诗花牌，效果更强所以更贵
 const LIMIT := 5         # 一局最多带 5 张花牌
 const EXTS := [".png", ".webp", ".jpg", ".jpeg"]
 
-## 史诗花牌：售价 14 两，商店里会标出来
+## 史诗花牌：售价 14 钱，商店里会标出来
 const EPIC_IDS := ["满天星", "紫罗兰"]
 
 ## 花牌效果登记表：左边是文件名（去掉扩展名），右边是效果代号。
@@ -26,13 +26,16 @@ const EFFECT_KEYS := {
 	"mantianxing": "star",
 	"紫罗兰": "violet",
 	"ziluolan": "violet",
+	"梅花": "meld_double",
+	"meihua": "meld_double",
 }
 ## 效果代号对应的说明文字（也给商店显示用）
 const EFFECT_DESCS := {
-	"combo": "连续打出刚摸到的牌 → 该张 ×连击数",
-	"repeat": "打出时牌河已有同样的牌 → 该张 ×5",
+	"combo": "打出的就是刚摸到的那张 → 倍率 +2",
+	"repeat": "打出时牌河已有同样的牌 → 倍率 +4",
 	"star": "每关额外增加 3 巡",
 	"violet": "每关开始可弃牌摸等量",
+	"meld_double": "碰、杠的倍率 ×2",
 }
 
 ## 图片最长边超过这个值就先缩下来。原图动辄 1300×2000，
@@ -89,7 +92,7 @@ static func is_epic(id: String) -> bool:
 
 
 static func price(id: String) -> int:
-	## 这张花牌卖多少两
+	## 这张花牌卖多少钱
 	return EPIC_PRICE if is_epic(id) else PRICE
 
 

@@ -225,8 +225,6 @@ func _apply_state() -> void:
 	var edge_width := 1.5
 	if face_down:
 		edge = BACK_BORDER
-	elif is_flower:
-		edge = DRAWN_BORDER  # 花牌用金边，一眼看出是特殊牌
 	elif is_concealed:
 		edge = CONCEALED_BORDER
 	elif is_melded:

@@ -239,9 +239,12 @@ func _test_levels() -> void:
 	_check_eq(LevelTableS.target_score(7), 450, "第 7 关目标 450 分（这里跳到 +100）")
 	_check_eq(LevelTableS.target_score(8), 550, "第 8 关目标 550 分")
 	_check_eq(LevelTableS.target_score(9), 650, "第 9 关目标 650 分")
-	_check_eq(LevelTableS.target_score(10), 750, "第 10 关目标 750 分")
-	_check_eq(LevelTableS.target_score(23), 2050, "第 23 关目标 2050 分")
-	_check_eq(LevelTableS.target_score(24), 2150, "第 24 关目标 2150 分")
+	_check_eq(LevelTableS.target_score(10), 800, "第 10 关目标 800 分（这里跳到 +200）")
+	_check_eq(LevelTableS.target_score(11), 1000, "第 11 关目标 1000 分")
+	_check_eq(LevelTableS.target_score(12), 1200, "第 12 关目标 1200 分")
+	_check_eq(LevelTableS.target_score(13), 1400, "第 13 关目标 1400 分")
+	_check_eq(LevelTableS.target_score(23), 3400, "第 23 关目标 3400 分")
+	_check_eq(LevelTableS.target_score(24), 3600, "第 24 关目标 3600 分")
 
 	_check_eq(LevelTableS.tours(1), 10, "第 1 关 10 巡")
 	_check_eq(LevelTableS.tours(3), 10, "第 3 关还是 10 巡")
@@ -264,21 +267,21 @@ func _test_levels() -> void:
 	_check_eq(LevelTableS.clear_reward(7), 8, "第 7 关又回到 8 金币")
 	_check_eq(LevelTableS.clear_reward(9), 10, "第 9 关过关给 10 金币")
 
-	# 过关银两 = 关卡奖励 + 剩余巡数
+	# 过关铜钱 = 关卡奖励 + 剩余巡数
 	var reward := MahjongRoundS.new()
-	reward.start(1, [], 1)          # 第 1 关：10 巡、基础 8 两
+	reward.start(1, [], 1)          # 第 1 关：10 巡、基础 8 钱
 	_check_eq(reward.remaining_tours(), 9, "开局还剩 9 巡")
-	_check_eq(reward.clear_coin_reward(), 17, "8 两 + 剩 9 巡 = 17 两")
+	_check_eq(reward.clear_coin_reward(), 17, "8 钱 + 剩 9 巡 = 17 钱")
 	reward.tour = 7
 	_check_eq(reward.remaining_tours(), 3, "打到第 7 巡还剩 3 巡")
-	_check_eq(reward.clear_coin_reward(), 11, "8 两 + 剩 3 巡 = 11 两")
+	_check_eq(reward.clear_coin_reward(), 11, "8 钱 + 剩 3 巡 = 11 钱")
 	reward.tour = 10
-	_check_eq(reward.clear_coin_reward(), 8, "最后一巡才过关，只剩基础 8 两")
+	_check_eq(reward.clear_coin_reward(), 8, "最后一巡才过关，只剩基础 8 钱")
 
 	# 巡数用完还没达标 → 本关失败
 	var failed := MahjongRoundS.new()
 	failed.start(7, [], 24)
-	_check_eq(failed.target_score, 2150, "第 24 关目标 2150 分")
+	_check_eq(failed.target_score, 3600, "第 24 关目标 3600 分")
 	_check_eq(failed.total_tours, 17, "第 24 关 17 巡")
 	# 全孤张：碰不上、杠不上、也胡不了，只能靠打出的每巡 10 分
 	failed.hand.reset(_parse_hand("147m 147p 147s 1257z 3z"))
@@ -292,7 +295,7 @@ func _test_levels() -> void:
 	_check_eq(failed.state, MahjongRoundS.State.LOST, "17 巡打完没达标 → 失败")
 	_check_eq(failed.score, 170, "只拿到打出的 17 × 10 = 170 分")
 	_check_eq(failed.tour, 17, "打满 17 巡")
-	_check_eq(failed.result_text, "17 巡打完 · 170 分（目标 2150 分）", "失败文案写清差距")
+	_check_eq(failed.result_text, "17 巡打完 · 170 分（目标 3600 分）", "失败文案写清差距")
 
 	# 换个低关口：同样的打法也能过关（第 1 关只要 100 分）
 	var passed := MahjongRoundS.new()
@@ -326,7 +329,7 @@ func _test_levels() -> void:
 
 func _test_shop() -> void:
 	print("道具与商店")
-	_check_eq(ShopItemsS.PRICE, 6, "道具售价都是 6 两")
+	_check_eq(ShopItemsS.PRICE, 6, "道具售价都是 6 钱")
 	_check_eq(ShopItemsS.POOL.size(), 4, "池子里有 4 件道具")
 	var keys: Array = []
 	for item in ShopItemsS.POOL:
@@ -361,24 +364,24 @@ func _test_shop() -> void:
 	repeat_round.discard(repeat_round.hand.tiles.find(18))   # 再打一条：牌河里已有一条
 	_check_eq(repeat_round.score, 60, "牌河里已有一条 → 这一张 ×5，共 60 分")
 
-	# 桃花：连续「摸什么打什么」分数 ×连击数，断了归零
-	_check_eq(FlowerTilesS.effect_key("桃花"), "combo", "桃花登记了「连击」效果")
+	# 桃花：打出的就是刚摸到的那张 → 倍率 +2（不再连击、不看历史）
+	_check_eq(FlowerTilesS.effect_key("桃花"), "combo", "桃花登记了「摸打」效果")
 	var combo := MahjongRoundS.new()
 	combo.start(1, [], 1)
 	combo.flowers.assign(["combo"])
 	combo.hand.reset(_parse_hand("19m 147p 1147s 123z"))
 	# 第一巡是庄家直接打出（不摸牌），先走掉这一手
 	combo.discard(combo.hand.tiles.size() - 1)
-	_check_eq(combo.combo_streak, 0, "第一巡没摸牌，连击还是 0")
+	_check_eq(combo.last_score_multiplier, 1, "第一巡没摸牌，倍率还是 1")
 	combo.run_opponent_turn()
 	for i in 3:
 		combo.draw_tile()                       # 摸一张
 		combo.discard(combo.hand.tiles.size())  # 就打摸到的那张
-		_check_eq(combo.combo_streak, i + 1, "第 %d 次摸打，连击 %d" % [i + 1, i + 1])
+		_check_eq(combo.last_score_multiplier, 3, "第 %d 次摸打，倍率都是 ×3" % [i + 1])
 		combo.run_opponent_turn()
-	_check_eq(combo.score, 10 + 10 + 20 + 30, "第一巡 10 分，之后 ×1、×2、×3，共 70 分")
+	_check_eq(combo.score, 10 + 30 * 3, "第一巡 10 分，之后三次都是 10 × 3，共 100 分")
 
-	# 中间打断：摸五万却打别的 → 连击归零
+	# 打手牌（不是刚摸到的那张）→ 没有加成
 	var broken := MahjongRoundS.new()
 	broken.start(1, [], 1)
 	broken.flowers.assign(["combo"])
@@ -386,23 +389,62 @@ func _test_shop() -> void:
 	broken.discard(broken.hand.tiles.size() - 1)  # 第一巡直接打出
 	broken.run_opponent_turn()
 	broken.draw_tile()
-	broken.discard(broken.hand.tiles.size())
-	_check_eq(broken.combo_streak, 1, "第一次摸打，连击 1")
-	broken.run_opponent_turn()
-	broken.draw_tile()
 	broken.discard(0)  # 打手牌，不打摸到的那张
-	_check_eq(broken.combo_streak, 0, "没打摸到的那张 → 连击断了")
+	_check_eq(broken.last_score_multiplier, 1, "没打摸到的那张 → 没有加成")
 
-	# 满天星（史诗花牌）：售价 14 两，每一关额外多三巡
+	# 荷花 + 桃花同时触发：倍率 = 1（基准）+ 4（荷花）+ 2（桃花）= 7
+	var both := MahjongRoundS.new()
+	both.flowers.assign(["combo", "repeat"])
+	both.start(1, [], 1)
+	both.hand.reset(_parse_hand("119m 147p 147s 12345z"))
+	both.discard(0)                       # 第一巡：牌河还是空的，先打一张一万
+	_check_eq(both.score, 10, "牌河空的，第一张一万正常 10 分")
+	both.run_opponent_turn()
+	both.wall.stack_next(0, 0)            # 摸到一万
+	both.draw_tile()
+	both.discard(both.hand.tiles.size())  # 就打摸到的一万：牌河已有一万 + 打的正是摸到的
+	_check_eq(both.last_score_multiplier, 7, "荷花 +4、桃花 +2 → 倍率 7")
+	_check_eq(both.score, 10 + 70, "10 × 7 = 70，加上第一张的 10 共 80")
+
+	# 梅花：碰、杠的倍率翻一倍
+	_check_eq(FlowerTilesS.effect_key("梅花"), "meld_double", "梅花登记了「碰杠倍率 ×2」效果")
+	_check_eq(FlowerTilesS.effect_desc("梅花"), "碰、杠的倍率 ×2", "梅花的说明写清了")
+	_check(not FlowerTilesS.is_epic("梅花"), "梅花是普通花牌")
+	var plum := _rig_ready(11, _parse_hand("11m 5m 9m 1p 4p 7p 1s 4s 7s 1z 3z 5z 7z"))
+	plum.flowers.assign(["meld_double"])
+	plum.wall.stack_next(2, 0)    # 自己摸三万，不胡
+	plum.wall.stack_next(0, 1)    # 电脑第一张打一万 → 可以碰
+	plum.wall.stack_next(26, 2)
+	plum.draw_tile()
+	plum.discard(plum.hand.tiles.size())
+	_check_eq(plum.opponent_discard_once(), 0, "电脑打出一万")
+	_check(plum.declare_pong(), "梅花在手照样能碰")
+	_check_eq(plum.last_score_multiplier, 4, "碰的倍率从 ×2 翻成 ×4")
+	_check_eq(plum.score_from_pongs, 120, "碰的计分：(10+10+10)×4 = 120")
+
+	# 梅花对杠也生效
+	var plum_kong := _rig_ready(21, _parse_hand("111m 4m 7m 1p 4p 7p 1s 4s 7s 1z 3z"))
+	plum_kong.flowers.assign(["meld_double"])
+	plum_kong.wall.stack_next(2, 0)
+	plum_kong.wall.stack_next(0, 1)
+	plum_kong.wall.stack_next(26, 2)
+	plum_kong.draw_tile()
+	plum_kong.discard(plum_kong.hand.tiles.size())
+	_check_eq(plum_kong.opponent_discard_once(), 0, "电脑打出一万")
+	_check(plum_kong.declare_kong(), "梅花在手照样能杠")
+	_check_eq(plum_kong.last_score_multiplier, 10, "杠的倍率从 ×5 翻成 ×10")
+	_check_eq(plum_kong.score_from_kongs, 400, "杠的计分：(10+10+10+10)×10 = 400")
+
+	# 满天星（史诗花牌）：售价 14 钱，每一关额外多三巡
 	_check_eq(FlowerTilesS.effect_key("满天星"), "star", "满天星登记了效果")
 	_check(FlowerTilesS.effect_desc("满天星") != "", "满天星有说明文字")
 	_check(FlowerTilesS.is_epic("满天星"), "满天星是史诗花牌")
 	_check(not FlowerTilesS.is_epic("桃花"), "桃花还是普通花牌")
 	_check_eq(FlowerTilesS.rarity_name("满天星"), "史诗", "稀有度显示「史诗」")
 	_check_eq(FlowerTilesS.rarity_name("荷花"), "普通", "普通花牌显示「普通」")
-	_check_eq(FlowerTilesS.price("满天星"), 14, "史诗花牌卖 14 两")
-	_check_eq(FlowerTilesS.price("桃花"), 10, "普通花牌还是 10 两")
-	_check_eq(FlowerTilesS.price("荷花"), 10, "普通花牌还是 10 两")
+	_check_eq(FlowerTilesS.price("满天星"), 14, "史诗花牌卖 14 钱")
+	_check_eq(FlowerTilesS.price("桃花"), 10, "普通花牌还是 10 钱")
+	_check_eq(FlowerTilesS.price("荷花"), 10, "普通花牌还是 10 钱")
 	_check_eq(FlowerTilesS.LIMIT, 5, "一局最多带 5 张花牌")
 	var peach_path := FlowerTilesS.path_of("桃花")
 	_check(peach_path != "" and peach_path.contains("桃花"), "按名字能找到花牌的图片")
@@ -414,7 +456,7 @@ func _test_shop() -> void:
 	star.start(1, [], 1)
 	_check_eq(star.total_tours, LevelTableS.tours(1) + 3, "满天星多三巡：第 1 关 13 巡")
 	_check_eq(star.remaining_tours(), 12, "第 1 关开局还剩 12 巡")
-	_check_eq(star.clear_coin_reward(), 8 + 12, "剩几巡就多给几两，史诗花牌照样算")
+	_check_eq(star.clear_coin_reward(), 8 + 12, "剩几巡就多给几钱，史诗花牌照样算")
 	var star_end := MahjongRoundS.new()
 	star_end.flowers.assign(["star"])
 	star_end.start(2, [], 24)
@@ -612,9 +654,8 @@ func _test_pong() -> void:
 
 	# 碰完打一张，电脑把本轮剩下的牌出完
 	round_.flowers.assign(["combo"])
-	round_.combo_streak = 3  # 假装之前连了三次
 	round_.discard(0)
-	_check_eq(round_.combo_streak, 0, "碰之后的打出会打断桃花连击")
+	_check_eq(round_.last_score_multiplier, 1, "碰之后打的是手牌，桃花不给加成")
 	_check_eq(round_.hand.tiles.size(), 10, "打完只剩 10 张暗牌")
 	_check_eq(round_.state, MahjongRoundS.State.AI_TURN, "电脑继续出剩下的牌")
 	round_.opponent_discard_once()
@@ -646,9 +687,8 @@ func _test_kong() -> void:
 	_check("杠" in round_.claim_hint(), "提示里说明杠完会补摸一张")
 
 	var before := round_.wall.remaining()
-	# 顺手验证：杠是「摸一打一」，打补摸的那张不算断连击
+	# 顺手验证：杠是「摸一打一」，打补摸上来的那张照样算桃花的「摸打」
 	round_.flowers.assign(["combo"])
-	round_.combo_streak = 2
 	_check(round_.declare_kong(), "杠成功")
 	_check_eq(round_.melds.size(), 1, "杠下了一副")
 	_check_eq(round_.melds[0]["kind"], 0, "杠的是一万")
@@ -668,7 +708,7 @@ func _test_kong() -> void:
 
 	# 打完这一张，电脑把本轮剩下的牌出完
 	round_.discard(round_.hand.tiles.size())
-	_check_eq(round_.combo_streak, 3, "杠之后打补摸的牌，桃花连击继续")
+	_check_eq(round_.last_score_multiplier, 3, "杠完打补摸的那张，桃花 +2")
 	_check_eq(round_.hand.tiles.size(), 10, "打完只剩 10 张暗牌")
 	_check_eq(round_.state, MahjongRoundS.State.AI_TURN, "电脑继续出剩下的牌")
 	round_.run_opponent_turn()
@@ -745,7 +785,7 @@ func _test_violet_swap() -> void:
 	print("紫罗兰：每关（回合）开局换牌")
 	_check_eq(FlowerTilesS.effect_key("紫罗兰"), "violet", "紫罗兰登记了「开局换牌」效果")
 	_check(FlowerTilesS.is_epic("紫罗兰"), "紫罗兰是史诗花牌")
-	_check_eq(FlowerTilesS.price("紫罗兰"), 14, "史诗花牌卖 14 两")
+	_check_eq(FlowerTilesS.price("紫罗兰"), 14, "史诗花牌卖 14 钱")
 
 	# 没买就没有这个能力
 	var plain := MahjongRoundS.new()
@@ -1002,13 +1042,18 @@ func _test_ui_scene_smoke() -> void:
 		instance.set("ai_discard_delay", 0.0)
 		_check_eq(round_ref.hand.tiles.size(), 14, "界面上是庄家起手 14 张")
 		_check_eq(round_ref.tour, 1, "界面从第一巡开始")
-		instance.call("_on_draw_pressed")
-		_check_eq(round_ref.hand.size(), 14, "第一巡不摸牌，点也没用")
+		_check_eq(round_ref.state, MahjongRoundS.State.DISCARDING, "第一巡不用摸牌，直接等打牌")
 		if round_ref.state != MahjongRoundS.State.WON:
 			_check_eq(round_ref.ai_discards_this_turn().size(), 0, "界面：玩家还没打牌，电脑不出牌")
 			_check_eq(instance.get("_right_pool").get_child_count(), 0, "界面：牌河还是空的")
 			instance.call("_do_discard", 0)
 			_check_eq(round_ref.hand.size(), 13, "第一巡打完剩 13 张")
+			# 得分飘窗：打出 10 分就弹一下「10」，没有倍率时不写 ×N
+			var board: Control = instance.get("_score_popup")
+			_check_eq(board.visible, true, "界面：得分时弹出飘分板")
+			_check_eq(instance.get("_score_popup_base").text, "10", "界面：飘分板写底数")
+			_check_eq(instance.get("_score_popup_mult").visible, false,
+				"界面：没有倍率就不显示 ×N")
 			var guard := 0
 			while guard < 900:
 				await process_frame
@@ -1020,8 +1065,15 @@ func _test_ui_scene_smoke() -> void:
 					break
 			_check(round_ref.ai_discards.size() >= 1, "界面：玩家打完后电脑才出牌")
 			_check_eq(round_ref.tour, 2, "界面：电脑出完进入第二巡")
-			instance.call("_on_draw_pressed")
-			_check_eq(round_ref.hand.size(), 14, "第二巡摸牌后 14 张")
+			await process_frame
+			await process_frame
+			_check_eq(round_ref.hand.size(), 14, "界面：轮到摸牌就自动摸了，不用点按钮")
+			# 按钮是按「这一行有多宽」居中的，换按钮之后位置得跟着重算
+			var action_row: Control = instance.get("_action_row")
+			var center_area: Control = instance.get("_center")
+			_check(absf(action_row.position.x + action_row.size.x * 0.5
+					- center_area.size.x * 0.5) < 1.0,
+				"界面：摸完牌之后「打出」按钮还是居中的")
 			var in_pools: int = instance.get("_right_pool").get_child_count() \
 				+ instance.get("_across_pool").get_child_count() \
 				+ instance.get("_left_pool").get_child_count()
@@ -1049,6 +1101,20 @@ func _test_ui_scene_smoke() -> void:
 			_check(instance.get("_shop_page").visible == false, "界面：过关先看结算页，不是商店")
 			instance.call("_on_settle_button_pressed")
 			_check(instance.get("_shop_page").visible, "界面：点「结算」才进商店")
+			# 商店卡片上不写效果，鼠标压上去用气泡讲
+			var flower_cards: Array = instance.get("_flower_slots")
+			_check_eq(flower_cards[0].has("effect"), false, "界面：花牌卡片上不再写效果")
+			var bubble: Node = instance.get("_item_popup")
+			_check_eq(bubble.visible, false, "界面：气泡平时藏着")
+			instance.call("_on_slot_hover_in", flower_cards[0]["root"])
+			_check_eq(bubble.visible, true, "界面：鼠标压到卡片上就弹气泡")
+			var bubble_text: Label = instance.get("_popup_body")
+			_check_eq(bubble_text.text, str(flower_cards[0]["root"].get_meta("popup_text")),
+				"界面：气泡写的就是这张卡的效果")
+			_check(bubble_text.text != "" and not bubble_text.text.contains("钱"),
+				"界面：气泡里不写名字也不写价格")
+			instance.call("_hide_item_popup")
+			_check_eq(bubble.visible, false, "界面：气泡能收起来")
 			instance.call("_show_settlement", true)
 			settings.coins = 50
 			instance.call("_on_restart_pressed")
@@ -1066,7 +1132,7 @@ func _test_ui_scene_smoke() -> void:
 			_check_eq(settings.coins, 0, "界面：没达标重开要把金币清零")
 			_check(instance.get("_shop_page").visible == false, "界面：没达标点了也不会进商店")
 
-			# 满天星：商店里买下来（14 两），下一关就要多三巡
+			# 满天星：商店里买下来（14 钱），下一关就要多三巡
 			settings.coins = 50
 			round_ref.level = 1
 			round_ref.state = MahjongRoundS.State.WON
@@ -1075,7 +1141,7 @@ func _test_ui_scene_smoke() -> void:
 			flower_slot["flower"] = {"id": "满天星", "path": "", "epic": true}
 			flower_slot["bought"] = false
 			instance.call("_on_buy_flower_pressed", 0)
-			_check_eq(settings.coins, 36, "界面：满天星扣 14 两")
+			_check_eq(settings.coins, 36, "界面：满天星扣 14 钱")
 			_check(instance.get("_owned_flowers").has("满天星"), "界面：买到手了")
 			instance.call("_on_restart_pressed")
 			round_ref = instance.get("round_")
@@ -1083,6 +1149,13 @@ func _test_ui_scene_smoke() -> void:
 			_check_eq(round_ref.total_tours, LevelTableS.tours(2) + 3, "界面：第 2 关变成 13 巡")
 			_check_eq(round_ref.flowers.has("star"), true, "界面：花牌效果带进了新一关")
 			_check_eq(instance.get("_remain_value").text, "12 巡", "界面：分数牌上写 12 巡")
+
+			# 飘分板停一会儿要自己收起来（帧率不定，给足次数）
+			var waited := 0
+			while waited < 3000 and board.visible:
+				await process_frame
+				waited += 1
+			_check_eq(board.visible, false, "界面：飘分板统计完会消失")
 
 			# 紫罗兰：界面上得能挑牌换牌
 			var owned: Array = instance.get("_owned_flowers")
@@ -1093,7 +1166,8 @@ func _test_ui_scene_smoke() -> void:
 			_check_eq(instance.get("_swap_button").visible, true, "界面：有紫罗兰就出现「换牌」按钮")
 			instance.call("_on_swap_pressed")
 			_check_eq(instance.get("_swap_confirm_button").visible, true, "界面：进了换牌模式")
-			_check_eq(instance.get("_draw_button").visible, false, "界面：挑牌的时候先不给摸牌")
+			# 换牌是「本回合还没摸牌/打牌」的时候才能用，跟自动摸牌不冲突
+			_check_eq(round_ref.can_swap(), true, "界面：换牌窗口还开着")
 			var hand_before: int = round_ref.hand.tiles.size()
 			instance.call("_on_tile_pressed", 0)
 			instance.call("_on_tile_pressed", 1)

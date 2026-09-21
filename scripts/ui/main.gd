@@ -35,6 +35,45 @@ const MELD_GAP := 18.0
 ## 高度一直占着（哪怕一张都没买），这样买第一张花牌时版面不会跳
 const FLOWER_TILE := TileWidget.TILE_SIZE
 const FLOWER_STRIP_HEIGHT := 100.0
+
+# ---- 商店里的悬停气泡（美术在 assets/ui/itemPopup.png，2048×2048 透明 PNG）----
+const UI_ITEM_POPUP := "res://assets/ui/itemPopup.png"
+const UI_PRICE_PLATE := "res://assets/ui/priceBackground.png"
+const UI_ITEM_CARD := "res://assets/ui/itemBackground.png"
+const UI_SCORE_BOARD := "res://assets/ui/score.png"
+## 得分飘窗：木牌挂在屏幕上方，底数和倍率分开写
+const SCORE_BOARD_SIZE := Vector2(360.0, 117.0)
+const SCORE_POPUP_TOP := 56.0
+## 进场时从多高的地方滑下来
+const SCORE_POPUP_DROP := 44.0
+const BOARD_INK := Color(0.26, 0.15, 0.07)
+const BOARD_RED := Color(0.64, 0.18, 0.09)
+## 商品卡片的实际图形（裁掉透明留白）。卡片尺寸按这张图的比例来，整张贴不打九宫格，
+## 免得角上的折角被拉伸。
+const CARD_REGION := Rect2(470.0, 235.0, 1108.0, 1572.0)
+## 卡片比价格牌窄一点，价格牌就会从卡片两侧探出去（参考图就是这样）
+const CARD_SIZE := Vector2(132.0, 196.0)
+## 卡片里那张插画：花牌用牌面本身，道具用麻将牌当图标
+const CARD_ART := Vector2(78.0, 107.0)
+const CARD_ICON := Vector2(74.0, 101.0)
+## 卡片里内容的边距：左右几乎贴边、上面留一点、下面不留（价格牌要盖住卡片底边）
+const CARD_SIDE_MARGIN := 2
+const CARD_TOP_MARGIN := 10
+const CARD_BOTTOM_OVERLAP := 5
+## 价格牌（招财进宝那张）：裁掉透明留白，价格写在金币右边的绿底上
+const PLATE_REGION := Rect2(13.0, 649.0, 2015.0, 675.0)
+const PLATE_SIZE := Vector2(148.0, 50.0)
+## 价钱写在金币右边那截绿底上（左右都是占牌宽的比例）
+const PLATE_TEXT_LEFT := 0.36
+const PLATE_TEXT_RIGHT := 0.90
+## 气泡在画布里的实际位置、内胆（能写字的地方）占气泡的比例
+const POPUP_REGION := Rect2(85.0, 266.0, 1879.0, 1511.0)
+const POPUP_TEXT := Rect2(0.044, 0.060, 0.912, 0.862)
+const POPUP_SIZE := Vector2(150.0, 121.0)
+const POPUP_TAIL := 0.08     # 下面尖角占气泡高度的比例，气泡要压住卡片一点点
+## 米色内胆上的字用深色
+const INK_DARK := Color(0.20, 0.14, 0.09)
+const INK_MID := Color(0.44, 0.34, 0.23)
 ## 按钮在屏幕中线之上再抬这么高，跟自己的牌河拉开距离
 const ACTION_RAISE := 24.0
 
@@ -62,7 +101,6 @@ var _my_pool: DiscardPool
 var _across_pool: DiscardPool
 var _left_pool: DiscardPool
 var _right_pool: DiscardPool
-var _draw_button: Button
 var _discard_button: Button
 var _ron_button: Button
 var _pong_button: Button
@@ -88,17 +126,23 @@ var _settle_tour_bonus: Label
 var _settle_tour_bonus_row: Control
 var _settle_button: Button
 var _coin_value: Label
-var _combo_value: Label
-var _combo_row: Control
 var _settle_page: VBoxContainer
 var _shop_page: VBoxContainer
-var _shop_balance: Label
 var _shop_slots: Array = []
 var _flower_slots: Array = []
+var _item_popup: Control
+var _popup_body: Label
+var _popup_token: int = 0
+var _score_popup: Control
+var _score_board: Control
+var _score_popup_base: Label
+var _score_popup_mult: Label
+var _score_popup_tween: Tween
+var _score_shown_serial: int = 0
 var _shop_next_button: Button
 var _run_bonus := {"wan": 0, "tong": 0, "tiao": 0, "honor": 0}
 var _owned_flowers: Array[String] = []    # 本局买到的花牌（按图片名，花牌只卖一次）
-var _settled_round: MahjongRound = null  # 已经结过算的那一局，防止重复发银两
+var _settled_round: MahjongRound = null  # 已经结过算的那一局，防止重复发铜钱
 var _hint_discards: Array = []            # 这一手打出去能听牌的牌
 var _swap_mode: bool = false              # 紫罗兰：正在挑要弃掉的牌
 var _swap_selection: Array[int] = []      # 挑中的手牌下标
@@ -246,8 +290,6 @@ func _build_ui() -> void:
 	_action_row.size = Vector2.ZERO
 	_center.add_child(_action_row)
 
-	_draw_button = _make_action_button("摸牌", _on_draw_pressed, ACTION_GOLD, ACTION_INK)
-	_action_row.add_child(_draw_button)
 	_discard_button = _make_action_button("打出", _on_discard_pressed, ACTION_GOLD, ACTION_INK)
 	_action_row.add_child(_discard_button)
 	# 紫罗兰：每关开局换牌（按钮平时都藏着，能用的时候才出现）
@@ -296,6 +338,89 @@ func _build_ui() -> void:
 	_tile_row.add_theme_constant_override("separation", int(TILE_GAP))
 	row_wrap.add_child(_tile_row)
 
+	# 悬停气泡要盖在所有东西最上面，所以放在最后建
+	_build_item_popup()
+	_build_score_popup()
+
+
+func _build_score_popup() -> void:
+	## 得分飘窗：打一张牌、碰一下、胡一把，都在屏幕上方弹一下再消失
+	_score_popup = Control.new()
+	_score_popup.custom_minimum_size = SCORE_BOARD_SIZE
+	_score_popup.size = SCORE_BOARD_SIZE
+	_score_popup.pivot_offset = SCORE_BOARD_SIZE * 0.5
+	_score_popup.visible = false
+	_score_popup.z_index = 9
+	_score_popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_score_popup)
+
+	# 牌子本体单独一层：外壳负责「挂在屏幕哪个位置」，
+	# 本体负责「从上面滑下来」，两边互不打架
+	_score_board = Control.new()
+	_score_board.custom_minimum_size = SCORE_BOARD_SIZE
+	_score_board.size = SCORE_BOARD_SIZE
+	_score_board.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_score_popup.add_child(_score_board)
+
+	var board := TextureRect.new()
+	board.texture = load(UI_SCORE_BOARD)
+	board.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	board.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	board.set_anchors_preset(Control.PRESET_FULL_RECT)
+	board.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_score_board.add_child(board)
+
+	# 底数和倍率分开写：10 ／ 30 × 2 ／ 140 × 10
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 12)
+	row.set_anchors_preset(Control.PRESET_FULL_RECT)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_score_board.add_child(row)
+
+	_score_popup_base = _make_label("", 40, BOARD_INK)
+	_score_popup_base.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(_score_popup_base)
+
+	_score_popup_mult = _make_label("", 30, BOARD_RED)
+	_score_popup_mult.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(_score_popup_mult)
+
+
+func _show_score_popup(base: int, multiplier: int) -> void:
+	if _score_popup == null:
+		return
+	_score_popup_base.text = "%d" % base
+	_score_popup_mult.text = "× %d" % multiplier
+	_score_popup_mult.visible = multiplier > 1
+	_score_popup.visible = true
+	if _score_popup_tween != null and _score_popup_tween.is_valid():
+		_score_popup_tween.kill()
+	_layout_score_popup()
+	# 从上面滑下来落位：牌子先抬高 44 像素、透明，然后滑到位并显形
+	_score_board.position = Vector2(0.0, -SCORE_POPUP_DROP)
+	_score_popup.modulate.a = 0.0
+	_score_popup_tween = create_tween()
+	_score_popup_tween.set_parallel(true)
+	_score_popup_tween.tween_property(_score_board, "position", Vector2.ZERO, 0.24) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_score_popup_tween.tween_property(_score_popup, "modulate:a", 1.0, 0.16)
+	_score_popup_tween.set_parallel(false)
+	_score_popup_tween.tween_interval(0.8)
+	_score_popup_tween.tween_property(_score_popup, "modulate:a", 0.0, 0.3)
+	_score_popup_tween.tween_callback(func() -> void:
+		_score_popup.visible = false
+		_score_board.position = Vector2.ZERO)
+
+
+func _layout_score_popup() -> void:
+	## 飘窗挂在牌桌正上方的屏幕顶上
+	if _score_popup == null or _center == null:
+		return
+	_score_popup.position = Vector2(
+		_center.global_position.x + _center.size.x * 0.5 - _score_popup.size.x * 0.5,
+		SCORE_POPUP_TOP)
+
 
 func _make_pool(facing: float) -> DiscardPool:
 	var pool := DiscardPool.new()
@@ -334,6 +459,9 @@ func _layout_table() -> void:
 	var local_center_y := screen_center_y - ACTION_RAISE - _center.global_position.y
 	_action_row.position = Vector2(cx - _action_row.size.x * 0.5,
 		local_center_y - _action_row.size.y * 0.5)
+
+	# 飘分板挂在牌桌正上方的屏幕顶上（这里跟着一起重算，避免开局时位置还没定下来）
+	_layout_score_popup()
 
 
 func _rebuild_pools() -> void:
@@ -405,16 +533,14 @@ func _build_scoreboard() -> PanelContainer:
 	_target_value = _add_score_row(box, "目标分数")
 	_score_value = _add_score_row(box, "当前得分", 44)  # 得分最显眼
 	_wall_value = _add_score_row(box, "牌墙剩余")
-	_coin_value = _add_score_row(box, "银两")
-	_combo_value = _add_score_row(box, "桃花连击")
-	_combo_row = _combo_value.get_parent()
+	_coin_value = _add_score_row(box, "铜钱")
 	return panel
 
 
 func _build_settlement() -> void:
 	## 过关结算板：从屏幕左侧抽屉式滑出
 	const PANEL_W := 440.0
-	const PANEL_H := 620.0
+	const PANEL_H := 540.0   # 商店去掉标题和铜钱之后，抽屉收回刚好装得下的高度
 	var panel := PanelContainer.new()
 	panel.anchor_top = 0.5
 	panel.anchor_bottom = 0.5
@@ -458,7 +584,7 @@ func _build_settlement() -> void:
 	_settle_tours = _add_score_row(_settle_page, "剩余巡数", 36)
 	_settle_tour_bonus = _add_score_row(_settle_page, "剩余巡奖励", 36)
 	_settle_coin = _add_score_row(_settle_page, "过关奖励", 36)
-	_settle_total = _add_score_row(_settle_page, "银两总数", 36)
+	_settle_total = _add_score_row(_settle_page, "铜钱总数", 36)
 	_settle_tours_row = _settle_tours.get_parent()
 	_settle_tour_bonus_row = _settle_tour_bonus.get_parent()
 	_settle_coin_row = _settle_coin.get_parent()
@@ -483,6 +609,7 @@ func _show_settlement(won: bool) -> void:
 	const TARGET_LEFT := 24.0
 	_settle_page.visible = true
 	_shop_page.visible = false
+	_hide_item_popup()
 	var first_time := _settled_round != round_
 	_settled_round = round_
 	if won:
@@ -493,7 +620,7 @@ func _show_settlement(won: bool) -> void:
 			Settings.add_coins(reward)
 		_settle_title.text = "过关！"
 		_settle_title.add_theme_color_override("font_color", GOLD)
-		# 过关只写银两信息：剩余巡数、剩余巡奖励、过关奖励、总数
+		# 过关只写铜钱信息：剩余巡数、剩余巡奖励、过关奖励、总数
 		_settle_tours.text = "%d 巡" % tour_bonus
 		_settle_tour_bonus.text = "+%d" % tour_bonus
 		_settle_coin.text = "+%d" % base_reward
@@ -543,20 +670,14 @@ func _hide_settlement() -> void:
 func _build_shop_page() -> VBoxContainer:
 	var page := VBoxContainer.new()
 	page.alignment = BoxContainer.ALIGNMENT_CENTER
-	page.add_theme_constant_override("separation", 14)
-
-	var title := _make_label("商店", 46, GOLD)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	page.add_child(title)
-
-	_shop_balance = _make_label("", 22, DIM)
-	_shop_balance.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	page.add_child(_shop_balance)
+	page.add_theme_constant_override("separation", 18)
 
 	# 第一行：花牌（图片在 assets/tiles/flowers/ 里）
 	var row_one := HBoxContainer.new()
 	row_one.alignment = BoxContainer.ALIGNMENT_CENTER
-	row_one.add_theme_constant_override("separation", 14)
+	# 价格牌比卡片宽、会从两侧各探出一点，卡片之间要留够，
+	# 让「牌子之间的净空」跟「上下两行的净空」看起来差不多
+	row_one.add_theme_constant_override("separation", 30)
 	for i in 2:
 		var slot := _build_flower_slot(i)
 		_flower_slots.append(slot)
@@ -566,7 +687,7 @@ func _build_shop_page() -> VBoxContainer:
 	# 第二行：两件随机道具
 	var row_two := HBoxContainer.new()
 	row_two.alignment = BoxContainer.ALIGNMENT_CENTER
-	row_two.add_theme_constant_override("separation", 14)
+	row_two.add_theme_constant_override("separation", 30)
 	for i in 2:
 		var slot := _build_shop_slot(i)
 		_shop_slots.append(slot)
@@ -574,63 +695,128 @@ func _build_shop_page() -> VBoxContainer:
 	page.add_child(row_two)
 
 	_shop_next_button = _make_action_button("下一关", _on_restart_pressed,
-		ACTION_GOLD, ACTION_INK, Vector2(240, 64))
+		ACTION_GOLD, ACTION_INK, Vector2(220, 56))
 	page.add_child(_shop_next_button)
 	return page
 
 
-func _slot_panel(width: float, height: float) -> PanelContainer:
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(width, height)
-	var style := StyleBoxFlat.new()
-	style.bg_color = UiStyle.BG
-	style.set_corner_radius_all(12)
-	style.set_border_width_all(2)
-	style.border_color = UiStyle.GOLD.darkened(0.55)
-	style.set_content_margin_all(12.0)
-	panel.add_theme_stylebox_override("panel", style)
+func _slot_panel() -> Control:
+	## 商品卡片：底图整张铺（itemBackground），上面摆插画和价格牌。
+	## 卡片尺寸就是照这张图的比例定的，整贴不会变形，也就不需要九宫格。
+	var panel := Control.new()
+	panel.custom_minimum_size = CARD_SIZE
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+
+	var atlas := AtlasTexture.new()
+	atlas.atlas = load(UI_ITEM_CARD)
+	atlas.region = CARD_REGION
+	var bg := TextureRect.new()
+	bg.texture = atlas
+	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	bg.stretch_mode = TextureRect.STRETCH_SCALE
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(bg)
+
 	return panel
 
 
+func _place_in_card(card: Control, node: Control, node_size: Vector2,
+		center_y: float = -1.0) -> void:
+	## 卡片里的东西一律按卡片坐标摆：
+	## 横向取卡片正中，纵向默认摆在「插画区」正中（卡片顶边到价格牌上沿之间）。
+	## 之所以不用容器：卡片比价格牌窄，容器算出来的宽度会把插画挤到一边。
+	var area_top := float(CARD_TOP_MARGIN)
+	var area_bottom := CARD_SIZE.y - PLATE_SIZE.y + CARD_BOTTOM_OVERLAP
+	node.size = node_size
+	node.position = Vector2((CARD_SIZE.x - node_size.x) * 0.5,
+		center_y if center_y >= 0.0 else area_top + (area_bottom - area_top - node_size.y) * 0.5)
+	card.add_child(node)
+
+
+func _place_price_plate(card: Control, plate: Button) -> void:
+	## 价格牌比卡片宽，要按卡片居中、底部压住卡片下沿
+	plate.position = Vector2((CARD_SIZE.x - PLATE_SIZE.x) * 0.5,
+		CARD_SIZE.y - PLATE_SIZE.y + CARD_BOTTOM_OVERLAP)
+	card.add_child(plate)
+
+
 func _build_flower_slot(index: int) -> Dictionary:
-	var panel := _slot_panel(186.0, 204.0)
-	var box := VBoxContainer.new()
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", 6)
-	panel.add_child(box)
+	var panel := _slot_panel()
 
-	var wrap := CenterContainer.new()
-	box.add_child(wrap)
+	# 插画：摆在卡片上半部分的正中
 	var tile := TileWidget.new()
-	tile.setup_flower("")
-	wrap.add_child(tile)
+	tile.setup_flower("", CARD_ART)
+	tile.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_place_in_card(panel, tile, CARD_ART)
 
-	# 稀有度单独占一行小标签：普通花牌是空的一行，位置一直留着，
-	# 两种花牌的槽位高度才一样
-	var rarity := _make_label("", 13, EPIC)
-	rarity.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	rarity.custom_minimum_size = Vector2(0.0, 18.0)
-	box.add_child(rarity)
-
-	var name_label := _make_label("花牌", 15, DIM)
+	# 只有「已满 / 已全部拥有」这类状态才写字，平时不占位置
+	var name_label := _make_label("", 13, DIM)
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(name_label)
+	name_label.visible = false
+	_place_in_card(panel, name_label, Vector2(CARD_SIZE.x - CARD_SIDE_MARGIN * 2.0, 20.0))
 
-	var effect := _make_label("效果待定", 13, DIM)
-	effect.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(effect)
-
-	var price := _make_label("%d 两" % FlowerTiles.PRICE, 18, GOLD)
-	price.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(price)
-
-	var buy := _make_action_button("购买", _on_buy_flower_pressed.bind(index),
-		ACTION_GOLD, ACTION_INK, Vector2(150, 46))
-	box.add_child(buy)
+	# 下半：一整条价格牌，点它就是购买
+	var price_ui := _build_price_plate(_on_buy_flower_pressed.bind(index))
+	_place_price_plate(panel, price_ui["button"])
+	# 卡片上不写效果了，鼠标压上去用气泡讲
+	_connect_slot_hover(panel, price_ui["button"])
 	return {
-		"root": panel, "tile": tile, "rarity": rarity, "name": name_label, "effect": effect,
-		"price": price, "buy": buy, "flower": {},
+		"root": panel, "tile": tile, "name": name_label,
+		"price": price_ui["label"], "plate": price_ui["plate"],
+		"buy": price_ui["button"], "flower": {},
 	}
+
+
+func _build_price_plate(handler: Callable) -> Dictionary:
+	## 价格牌：底图是招财进宝那张价格牌，价钱写在金币右边；
+	## 整块牌子就是一个按钮，点它＝买下这件东西。
+	var button := Button.new()
+	button.custom_minimum_size = PLATE_SIZE
+	button.focus_mode = Control.FOCUS_NONE
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	# 牌子由下面的图片画，按钮自己什么都不画
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		button.add_theme_stylebox_override(state, StyleBoxEmpty.new())
+	button.pressed.connect(handler)
+
+	var plate := TextureRect.new()
+	var atlas := AtlasTexture.new()
+	atlas.atlas = load(UI_PRICE_PLATE)
+	atlas.region = PLATE_REGION
+	plate.texture = atlas
+	plate.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	plate.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	plate.set_anchors_preset(Control.PRESET_FULL_RECT)
+	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(plate)
+
+	# 价格用金色写在深绿底上
+	var label := _make_label("", 17, GOLD)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.position = Vector2(PLATE_SIZE.x * PLATE_TEXT_LEFT, 0.0)
+	label.size = Vector2(PLATE_SIZE.x * (PLATE_TEXT_RIGHT - PLATE_TEXT_LEFT), PLATE_SIZE.y)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(label)
+
+	# 鼠标压上来亮一点；买不起（按钮禁用）的时候压暗
+	button.mouse_entered.connect(func() -> void:
+		if not button.disabled:
+			plate.modulate = Color(1.12, 1.12, 1.12))
+	button.mouse_exited.connect(func() -> void:
+		plate.modulate = _plate_modulate(button))
+	return {"button": button, "label": label, "plate": plate}
+
+
+static func _plate_modulate(button: Button) -> Color:
+	return Color(0.68, 0.68, 0.68) if button.disabled else Color.WHITE
+
+
+static func _show_slot_text(label: Label, text: String) -> void:
+	## 卡片上平时一个字都不写；只有「已满 / 已全部拥有」这类状态才显示一行
+	label.text = text
+	label.visible = text != ""
 
 
 func _roll_flowers() -> void:
@@ -640,47 +826,38 @@ func _roll_flowers() -> void:
 	for i in _flower_slots.size():
 		var slot: Dictionary = _flower_slots[i]
 		var tile: TileWidget = slot["tile"]
-		var rarity: Label = slot["rarity"]
 		var name_label: Label = slot["name"]
-		var effect: Label = slot["effect"]
 		var price: Label = slot["price"]
 		var buy: Button = slot["buy"]
 		if full:
 			# 花牌带满了：这一行不再摆货
 			slot["flower"] = {}
 			slot["bought"] = false
-			tile.setup_flower("")
-			rarity.text = ""
-			name_label.text = "花牌已满"
-			effect.text = "一局最多带 %d 张" % FlowerTiles.LIMIT
+			tile.setup_flower("", CARD_ART)
+			_show_slot_text(name_label, "花牌已满")
 			price.text = "—"
 			buy.disabled = true
+			_set_slot_popup(slot, "")
 			continue
 		if i >= flowers.size():
 			slot["flower"] = {}
 			slot["bought"] = false
-			tile.setup_flower("")
-			rarity.text = ""
-			if _owned_flowers.is_empty():
-				name_label.text = "还没有花牌图片"
-				effect.text = "放进 assets/tiles/flowers/"
-			else:
-				name_label.text = "已全部拥有"
-				effect.text = "花牌只卖一次"
+			tile.setup_flower("", CARD_ART)
+			_show_slot_text(name_label,
+				"还没有花牌图片" if _owned_flowers.is_empty() else "已全部拥有")
 			price.text = "—"
 			buy.disabled = true
+			_set_slot_popup(slot, "")
 			continue
 		var flower: Dictionary = flowers[i]
 		slot["flower"] = flower
 		slot["bought"] = false
-		tile.setup_flower(flower["path"])
-		# 名字就是名字，稀有度单独写在上面的小标签里
-		var epic := FlowerTiles.is_epic(flower["id"])
-		rarity.text = "史诗" if epic else ""
-		name_label.text = flower["id"]
-		name_label.add_theme_color_override("font_color", EPIC if epic else DIM)
+		tile.setup_flower(flower["path"], CARD_ART)
+		# 卡片上不写名字也不写效果：插画看牌面，效果靠悬停气泡
+		_show_slot_text(name_label, "")
 		var desc := FlowerTiles.effect_desc(flower["id"])
-		effect.text = desc if desc != "" else "效果待定"
+		# 效果不写在卡片上：鼠标压上去弹气泡，气泡里只写效果
+		_set_slot_popup(slot, desc if desc != "" else "效果待定")
 		_update_flower_slot(i)
 
 
@@ -691,20 +868,29 @@ func _update_flower_slot(index: int) -> void:
 	var buy: Button = slot["buy"]
 	if flower.is_empty():
 		buy.disabled = true
+		_refresh_price_plate(slot)
 		return
 	if slot["bought"]:
 		price.text = "已购买"
 		buy.disabled = true
+		_refresh_price_plate(slot)
 		return
 	var id: String = flower["id"]
-	price.text = "%d 两" % FlowerTiles.price(id)
-	price.add_theme_color_override("font_color",
-		EPIC if FlowerTiles.is_epic(id) else GOLD)
+	price.text = "%d 钱" % FlowerTiles.price(id)
 	# 效果还没登记的花牌先不让买，免得花冤枉钱
 	var key := FlowerTiles.effect_key(id)
 	# 带满了也不给买
 	var full := _owned_flowers.size() >= FlowerTiles.LIMIT
 	buy.disabled = key == "" or Settings.coins < FlowerTiles.price(id) or full
+	_refresh_price_plate(slot)
+
+
+func _refresh_price_plate(slot: Dictionary) -> void:
+	## 买不起 / 已经买过的时候，把价格牌压暗，一眼能看出按了没用
+	var plate: TextureRect = slot.get("plate")
+	var buy: Button = slot["buy"]
+	if plate != null:
+		plate.modulate = _plate_modulate(buy)
 
 
 func _on_buy_flower_pressed(index: int) -> void:
@@ -723,42 +909,27 @@ func _on_buy_flower_pressed(index: int) -> void:
 	Settings.add_coins(-cost)
 	_owned_flowers.append(flower["id"])
 	slot["bought"] = true
-	_shop_balance.text = "银两 %d" % Settings.coins
 	_update_flower_slot(index)
 	_refresh()
 
 
 func _build_shop_slot(index: int) -> Dictionary:
-	var panel := _slot_panel(186.0, 204.0)
-	var box := VBoxContainer.new()
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", 8)
-	panel.add_child(box)
+	var panel := _slot_panel()
 
-	var wrap := CenterContainer.new()
-	box.add_child(wrap)
 	var tile := TileWidget.new()
 	tile.setup(0)
-	tile.set_tile_size(Vector2(52, 72))
+	tile.set_tile_size(CARD_ICON)
 	tile.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	wrap.add_child(tile)
+	_place_in_card(panel, tile, CARD_ICON)
 
-	var desc := _make_label("", 15, DIM)
-	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc.custom_minimum_size = Vector2(158, 42)
-	box.add_child(desc)
-
-	var price := _make_label("", 18, GOLD)
-	price.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(price)
-
-	var buy := _make_action_button("购买", _on_buy_pressed.bind(index), ACTION_GOLD, ACTION_INK,
-		Vector2(150, 46))
-	box.add_child(buy)
+	var price_ui := _build_price_plate(_on_buy_pressed.bind(index))
+	_place_price_plate(panel, price_ui["button"])
+	# 道具卡片上也不写效果了，同样是悬停看气泡
+	_connect_slot_hover(panel, price_ui["button"])
 
 	return {
-		"root": panel, "tile": tile, "desc": desc, "price": price, "buy": buy,
+		"root": panel, "tile": tile, "price": price_ui["label"],
+		"plate": price_ui["plate"], "buy": price_ui["button"],
 		"item": -1, "bought": false,
 	}
 
@@ -775,9 +946,9 @@ func _roll_shop() -> void:
 		var item: Dictionary = ShopItems.POOL[picks[i]]
 		var tile: TileWidget = slot["tile"]
 		tile.setup(item["tile"])
-		tile.set_tile_size(Vector2(52, 72))
-		var desc: Label = slot["desc"]
-		desc.text = item["desc"]
+		tile.set_tile_size(CARD_ICON)
+		# 效果写在悬停气泡里（气泡里也只有效果）
+		_set_slot_popup(slot, item["desc"])
 		_update_shop_slot(i)
 
 
@@ -789,8 +960,100 @@ func _update_shop_slot(index: int) -> void:
 		price.text = "已购买"
 		buy.disabled = true
 	else:
-		price.text = "%d 两" % ShopItems.PRICE
+		price.text = "%d 钱" % ShopItems.PRICE
 		buy.disabled = Settings.coins < ShopItems.PRICE
+	_refresh_price_plate(slot)
+
+
+# ---------------------------------------------------------------- 商店的悬停气泡
+
+func _build_item_popup() -> void:
+	## 鼠标压到商品上时弹出来的气泡：卡片上不写效果，都在这儿讲
+	## 用普通 Control 当壳——用 PanelContainer 的话它自带的深色底板会从
+	## 气泡图的透明处（圆角、尖角两侧）露出来，看上去像一层黑遮罩。
+	_item_popup = Control.new()
+	_item_popup.custom_minimum_size = POPUP_SIZE
+	_item_popup.size = POPUP_SIZE
+	_item_popup.visible = false
+	_item_popup.z_index = 10
+	_item_popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_item_popup)
+
+	var bubble := TextureRect.new()
+	var atlas := AtlasTexture.new()
+	atlas.atlas = load(UI_ITEM_POPUP)
+	atlas.region = POPUP_REGION
+	bubble.texture = atlas
+	bubble.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	bubble.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	bubble.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bubble.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_item_popup.add_child(bubble)
+
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", int(POPUP_SIZE.x * POPUP_TEXT.position.x))
+	margin.add_theme_constant_override("margin_right",
+		int(POPUP_SIZE.x * (1.0 - POPUP_TEXT.position.x - POPUP_TEXT.size.x)))
+	margin.add_theme_constant_override("margin_top", int(POPUP_SIZE.y * POPUP_TEXT.position.y))
+	margin.add_theme_constant_override("margin_bottom",
+		int(POPUP_SIZE.y * (1.0 - POPUP_TEXT.position.y - POPUP_TEXT.size.y)))
+	_item_popup.add_child(margin)
+
+	_popup_body = _make_label("", 13, INK_DARK)
+	_popup_body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_popup_body.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_popup_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	margin.add_child(_popup_body)
+
+
+func _connect_slot_hover(panel: Control, buy: Button) -> void:
+	## 压在卡片上、或者压到购买键上，都算「正在看这件货」
+	panel.mouse_entered.connect(_on_slot_hover_in.bind(panel))
+	panel.mouse_exited.connect(_on_slot_hover_out)
+	buy.mouse_entered.connect(_on_slot_hover_in.bind(panel))
+	buy.mouse_exited.connect(_on_slot_hover_out)
+
+
+func _set_slot_popup(slot: Dictionary, text: String) -> void:
+	var panel: Control = slot["root"]
+	panel.set_meta("popup_text", text)
+
+
+func _on_slot_hover_in(slot_root: Control) -> void:
+	if _item_popup == null:
+		return
+	_popup_token += 1
+	var text := str(slot_root.get_meta("popup_text", ""))
+	if text == "":
+		_item_popup.visible = false
+		return
+	_popup_body.text = text
+	_item_popup.visible = true
+	# 气泡摆在卡片正上方，下面那个尖角压住卡片一点点
+	var view := get_viewport_rect().size
+	var pos := slot_root.global_position \
+		+ Vector2(slot_root.size.x * 0.5 - _item_popup.size.x * 0.5,
+			-_item_popup.size.y + POPUP_SIZE.y * POPUP_TAIL)
+	pos.x = clampf(pos.x, 8.0, maxf(8.0, view.x - _item_popup.size.x - 8.0))
+	pos.y = maxf(pos.y, 8.0)
+	_item_popup.global_position = pos
+
+
+func _on_slot_hover_out() -> void:
+	## 稍微等一下再收：从卡片挪到购买键上时不闪
+	_popup_token += 1
+	var token := _popup_token
+	await get_tree().create_timer(0.1).timeout
+	if token == _popup_token and _item_popup != null:
+		_item_popup.visible = false
+
+
+func _hide_item_popup() -> void:
+	_popup_token += 1
+	if _item_popup != null:
+		_item_popup.visible = false
 
 
 func _on_settle_pressed() -> void:
@@ -798,7 +1061,7 @@ func _on_settle_pressed() -> void:
 	_shop_page.visible = true
 	_roll_shop()
 	_roll_flowers()
-	_shop_balance.text = "银两 %d" % Settings.coins
+	_hide_item_popup()
 
 
 func _on_settle_button_pressed() -> void:
@@ -820,7 +1083,6 @@ func _on_buy_pressed(index: int) -> void:
 	var key: String = item["key"]
 	_run_bonus[key] = int(_run_bonus.get(key, 0)) + int(item["bonus"])
 	slot["bought"] = true
-	_shop_balance.text = "银两 %d" % Settings.coins
 	_update_shop_slot(index)
 	_refresh()
 
@@ -845,6 +1107,7 @@ func _start_new_round() -> void:
 	_has_selection = false
 	_ai_running = false
 	_draw_animated_for = -1
+	_score_shown_serial = 0
 	_hide_settlement()
 	round_ = MahjongRound.new()
 	round_.changed.connect(_refresh)
@@ -905,8 +1168,11 @@ func _reset_run_bonus() -> void:
 	_owned_flowers.clear()
 
 
-func _on_draw_pressed() -> void:
-	if not round_.can_draw():
+func _auto_draw() -> void:
+	## 轮到玩家该摸牌了，就自己摸——不用玩家再点一下「摸牌」
+	if round_ == null or round_.is_over():
+		return
+	if round_.state != MahjongRound.State.READY or not round_.can_draw():
 		return
 	_selected_index = -1
 	_has_selection = false
@@ -1069,17 +1335,26 @@ func _refresh() -> void:
 	_score_value.text = "%d" % round_.score
 	_wall_value.text = "%d 张" % round_.wall.remaining()
 	_coin_value.text = "%d" % Settings.coins
-	# 买了桃花才显示连击数
-	_combo_row.visible = round_.has_flower("combo")
-	if _combo_row.visible:
-		_combo_value.text = "×%d" % maxi(1, round_.combo_streak)
 	_rebuild_flowers()
 	_rebuild_tiles()
 	_rebuild_pools()
-	_layout_table()
 	_update_hint()
+	# 又得了一次分就弹一下飘分板
+	if round_.score_serial != _score_shown_serial:
+		_score_shown_serial = round_.score_serial
+		_show_score_popup(round_.last_score_base, round_.last_score_multiplier)
+	# 先把按钮该显示的显示出来，再排位置：
+	# 按钮是居中摆的，位置按「这一行有多宽」算，顺序反了就会拿上一帧的宽度去居中。
+	_update_action_buttons()
+	_layout_table()
 
-	# 按钮只在该做决定的时候出现：该摸牌就只给摸牌，该打牌就只给打出
+	# 轮到玩家摸牌就自动摸（延后一帧，免得在刷新过程中又触发一轮刷新）
+	if round_.state == MahjongRound.State.READY and not _ai_running:
+		_auto_draw.call_deferred()
+
+
+func _update_action_buttons() -> void:
+	## 按钮只在该做决定的时候出现：该打牌就只给打出，能碰能给碰
 	var state := round_.state
 	var claiming := state == MahjongRound.State.CLAIM
 	# 换牌窗口已经关了（比如刚摸完牌）就退出换牌模式，免得停在半路上
@@ -1090,8 +1365,7 @@ func _refresh() -> void:
 	_swap_cancel_button.visible = _swap_mode
 	_swap_confirm_button.disabled = _swap_selection.is_empty()
 	_swap_confirm_button.text = "确认换牌（%d）" % _swap_selection.size()
-	# 挑牌的时候先别给摸牌 / 打出，免得两件事搅在一起
-	_draw_button.visible = state == MahjongRound.State.READY and not _swap_mode
+	# 挑牌的时候先别给打出，免得两件事搅在一起
 	_discard_button.visible = state == MahjongRound.State.DISCARDING and not _swap_mode
 	_ron_button.visible = claiming and round_.can_ron
 	_kong_button.visible = claiming and round_.can_kong
@@ -1101,7 +1375,6 @@ func _refresh() -> void:
 	_concealed_kong_button.visible = state == MahjongRound.State.DISCARDING and round_.can_concealed_kong()
 	_pass_button.visible = claiming
 
-	_draw_button.disabled = not round_.can_draw()
 	_discard_button.disabled = not _has_selection
 
 
@@ -1294,8 +1567,11 @@ func _setup_debug_shot() -> void:
 			if round_.state == MahjongRound.State.AI_TURN:
 				round_.run_opponent_turn()
 		if "--shop" in args:
-			Settings.coins = 30  # 调试用：给点银两，方便看购买键
+			Settings.coins = 30  # 调试用：给点铜钱，方便看购买键
 			_on_settle_pressed()  # 点「结算」翻到商店
+			if "--popup" in args:
+				# 模拟鼠标压在第一张花牌上，看气泡
+				_debug_hover_first_flower()
 		elif "--clear2" in args:
 			_on_restart_pressed()  # 点「下一关」
 	elif "--clear3" in args:
@@ -1362,6 +1638,13 @@ func _debug_skip_first_tour() -> void:
 	round_.state = MahjongRound.State.READY
 
 
+func _debug_hover_first_flower() -> void:
+	## 调试用：等版面排完再模拟悬停，不然量到的是没排版时的坐标
+	for i in 3:
+		await get_tree().process_frame
+	_on_slot_hover_in(_flower_slots[0]["root"])
+
+
 func _debug_play_one_tour() -> void:
 	## 调试用：按当前状态走完玩家这一半（该摸就摸，该打就打）
 	if round_.state == MahjongRound.State.READY:
@@ -1388,6 +1671,9 @@ func _capture_and_quit() -> void:
 		if "--again" in OS.get_cmdline_user_args():
 			_on_restart_pressed()  # 点「重试本关」
 			await get_tree().create_timer(0.4).timeout
+	if "--ponged" in OS.get_cmdline_user_args() or "--win" in OS.get_cmdline_user_args():
+		# 这两条路径会得分、弹飘分板：等它滑到位再截图
+		await get_tree().create_timer(0.45).timeout
 	# 想抓动画中间帧的调试模式，少等几帧
 	var frames := 3 if "--draw" in OS.get_cmdline_user_args() else 4
 	for i in frames:

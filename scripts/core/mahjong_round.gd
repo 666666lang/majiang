@@ -28,7 +28,10 @@ const AI_DISCARDS_PER_TURN := 3
 const PONG_SCORE_MULTIPLIER := 2  # 碰的计分倍数：三张牌分值相加再乘这个数
 const KONG_SCORE_MULTIPLIER := 5  # 明杠的计分倍数：四张牌分值相加再乘这个数
 const CONCEALED_KONG_SCORE_MULTIPLIER := 6  # 暗杠的计分倍数（自己扣的，给得更高）
-const REPEAT_FLOWER_MULTIPLIER := 5         # 荷花：牌河里已有同样的牌时，这一张 ×5
+## 花牌的倍率是「加法」的：底数倍率算 1，两朵花各加各的
+const REPEAT_FLOWER_BONUS := 4              # 荷花：牌河里已有同样的牌 → 倍率 +4
+const COMBO_FLOWER_BONUS := 2               # 桃花：打的就是刚摸到的牌 → 倍率 +2
+const MELD_FLOWER_MULTIPLIER := 2           # 梅花：碰、杠的倍率再翻一倍（×2 的碰变成 ×4）
 const STAR_FLOWER_EXTRA_TOURS := 3          # 满天星（史诗）：每一关多给三巡
 ## 胡牌的计分倍数：全部牌的分值相加再乘下面这个数，三种胡法各自一档
 const WIN_SCORE_MULTIPLIER := 10        # 荣和（胡别人打出的牌）
@@ -61,9 +64,6 @@ var bonus_tiao: int = 0
 var bonus_honor: int = 0
 ## 本局买到的花牌效果（效果代号，比如 "combo"）
 var flowers: Array[String] = []
-## 桃花：连续「摸什么打什么」的连击数（断掉归零）
-var combo_streak: int = 0
-var _claim_broke_streak: bool = false   # 碰 / 杠 之后的打出必然打断连击
 ## 紫罗兰：换牌时弃掉的牌。不进牌河、不给分，也不会再回到牌墙里。
 var swapped: Array[int] = []
 var _swap_window: bool = false   # 「这一关开局」的换牌窗口开着没（一关只开一次）
@@ -77,6 +77,11 @@ var score_from_kongs: int = 0      # 其中「杠」贡献的部分
 var score_from_win: int = 0        # 其中「胡牌」贡献的部分
 var last_score_gain: int = 0       # 最近一次得分变化
 var last_score_reason: String = "" # 最近一次得分的来源
+## 最近一次得分的「底数」和「倍率」——界面弹分数时这两个是分开显示的
+var last_score_base: int = 0
+var last_score_multiplier: int = 1
+## 得分次数。界面靠它判断「又得了一次分」，跟得多少无关
+var score_serial: int = 0
 var _ai_discards_pending: int = 0
 var _ai_discards_shown_from: int = 0  # 本轮电脑出牌在 ai_discards 里的起点
 
@@ -187,28 +192,29 @@ func discard(index: int) -> int:
 		return -1
 	hand.settle()
 
-	# 桃花：连续「摸什么打什么」可以把这张的分数翻倍，断了就归零。
-	# 碰 / 杠 之后的打出一定打断（哪怕打的是补摸上来的那张）。
-	if has_flower("combo"):
-		if from_draw and not _claim_broke_streak:
-			combo_streak += 1
-		else:
-			combo_streak = 0
-	_claim_broke_streak = false
-
 	# 荷花：打出的这张，牌河里已经有同样的了
 	var repeat_in_pile := discards.has(tile)
 	discards.append(tile)
 	last_drawn = -1
-	var gained := tile_score(tile)
-	var reason := "打出 %s" % TileCodec.display_name(tile)
+	# 底数＝这张牌本身的分值；倍率＝1 再加两朵花的加成（加法，不是连乘）：
+	#   荷花：牌河里已有同样的牌 → +4（单出就是 ×5）
+	#   桃花：打的就是刚摸到的那张 → +2（单出就是 ×3）
+	var base := tile_score(tile)
+	var bonus := 0
+	var notes := PackedStringArray()
 	if repeat_in_pile and has_flower("repeat"):
-		gained *= REPEAT_FLOWER_MULTIPLIER
-		reason += " ×%d（牌河已有同样的）" % REPEAT_FLOWER_MULTIPLIER
-	if combo_streak > 1:
-		gained *= combo_streak
-		reason += " ×%d（桃花连击）" % combo_streak
-	_add_score(gained, reason)
+		bonus += REPEAT_FLOWER_BONUS
+		notes.append("牌河已有同样的 +%d" % REPEAT_FLOWER_BONUS)
+	# 桃花：只要打的是刚摸到的那张就给，不连击、不看之前打过什么
+	if from_draw and has_flower("combo"):
+		bonus += COMBO_FLOWER_BONUS
+		notes.append("打的是刚摸到的 +%d" % COMBO_FLOWER_BONUS)
+	var multiplier := 1 + bonus
+	var reason := "打出 %s" % TileCodec.display_name(tile)
+	if bonus > 0:
+		reason += " ×%d（%s）" % [multiplier, "，".join(notes)]
+	var gained := base * multiplier
+	_add_score_parts(base, multiplier, reason)
 	score_from_discards += gained
 
 	# 这一张打出去刚好达标，本关就到此为止，不用再轮到电脑
@@ -351,15 +357,15 @@ func declare_pong() -> bool:
 
 	# 碰的计分：三张牌的分值加起来，再翻倍
 	var each := tile_score(tile)
-	var gained := each * 3 * PONG_SCORE_MULTIPLIER
-	_add_score(gained, "碰 %s（%d+%d+%d）×%d" % [
-		TileCodec.display_name(tile), each, each, each, PONG_SCORE_MULTIPLIER,
+	var pong_multiplier := meld_score_multiplier(PONG_SCORE_MULTIPLIER)
+	var gained := each * 3 * pong_multiplier
+	_add_score_parts(each * 3, pong_multiplier, "碰 %s（%d+%d+%d）×%d%s" % [
+		TileCodec.display_name(tile), each, each, each, pong_multiplier, meld_flower_note(),
 	])
 	score_from_pongs += gained
 
 	_take_claimed_tile_from_discards()
 	_clear_claim()
-	_claim_broke_streak = true  # 碰之后的打出会打断桃花连击
 	last_drawn = -1
 	state = State.DISCARDING
 	changed.emit()
@@ -386,9 +392,10 @@ func declare_kong() -> bool:
 	melds.append({"kind": tile, "kong": true})
 
 	var each := tile_score(tile)
-	var gained := each * 4 * KONG_SCORE_MULTIPLIER
-	_add_score(gained, "杠 %s（%d+%d+%d+%d）×%d" % [
-		TileCodec.display_name(tile), each, each, each, each, KONG_SCORE_MULTIPLIER,
+	var kong_multiplier := meld_score_multiplier(KONG_SCORE_MULTIPLIER)
+	var gained := each * 4 * kong_multiplier
+	_add_score_parts(each * 4, kong_multiplier, "杠 %s（%d+%d+%d+%d）×%d%s" % [
+		TileCodec.display_name(tile), each, each, each, each, kong_multiplier, meld_flower_note(),
 	])
 	score_from_kongs += gained
 
@@ -440,6 +447,16 @@ func has_flower(key: String) -> bool:
 func flower_extra_tours() -> int:
 	## 花牌带来的额外巡数（目前只有满天星）
 	return STAR_FLOWER_EXTRA_TOURS if has_flower("star") else 0
+
+
+func meld_score_multiplier(base: int) -> int:
+	## 碰 / 杠的倍率：买了梅花就再翻一倍
+	return base * MELD_FLOWER_MULTIPLIER if has_flower("meld_double") else base
+
+
+func meld_flower_note() -> String:
+	## 结算文案里标一下梅花起了作用
+	return "（梅花 ×%d）" % MELD_FLOWER_MULTIPLIER if has_flower("meld_double") else ""
 
 
 # ---------------------------------------------------------------- 紫罗兰：每关（回合）开局换牌
@@ -541,9 +558,11 @@ func declare_concealed_kong() -> bool:
 
 	melds.append({"kind": tile, "kong": true, "concealed": true})
 	var each := tile_score(tile)
-	var gained := each * 4 * CONCEALED_KONG_SCORE_MULTIPLIER
-	_add_score(gained, "暗杠 %s（%d+%d+%d+%d）×%d" % [
-		TileCodec.display_name(tile), each, each, each, each, CONCEALED_KONG_SCORE_MULTIPLIER,
+	var concealed_multiplier := meld_score_multiplier(CONCEALED_KONG_SCORE_MULTIPLIER)
+	var gained := each * 4 * concealed_multiplier
+	_add_score_parts(each * 4, concealed_multiplier, "暗杠 %s（%d+%d+%d+%d）×%d%s" % [
+		TileCodec.display_name(tile), each, each, each, each, concealed_multiplier,
+		meld_flower_note(),
 	])
 	score_from_kongs += gained
 	last_drawn = -1
@@ -592,9 +611,18 @@ func _clear_claim() -> void:
 
 
 func _add_score(gained: int, reason: String) -> void:
-	score += gained
-	last_score_gain = gained
+	## 没有倍率的得分（比如打出一张牌）：底数就是它自己
+	_add_score_parts(gained, 1, reason)
+
+
+func _add_score_parts(base: int, multiplier: int, reason: String) -> void:
+	## 带倍率的得分：底数和倍率分开记，界面就能显示成「30 × 2」
+	score += base * multiplier
+	last_score_gain = base * multiplier
 	last_score_reason = reason
+	last_score_base = base
+	last_score_multiplier = multiplier
+	score_serial += 1
 
 
 func winning_hand_tiles() -> Array:
@@ -613,7 +641,7 @@ func _award_win_score(label: String, multiplier: int) -> void:
 	for tile in tiles:
 		base_total += tile_score(tile)
 	var points := base_total * multiplier
-	_add_score(points, "%s %d 张牌共 %d 分 × %d" % [
+	_add_score_parts(base_total, multiplier, "%s %d 张牌共 %d 分 × %d" % [
 		label, tiles.size(), base_total, multiplier,
 	])
 	score_from_win += points
@@ -681,7 +709,7 @@ func remaining_tours() -> int:
 
 
 func clear_coin_reward() -> int:
-	## 过关拿到的银两 = 关卡奖励 + 剩余巡数（剩几巡就多给几两）
+	## 过关拿到的铜钱 = 关卡奖励 + 剩余巡数（剩几巡就多给几钱）
 	return LevelTable.clear_reward(level) + remaining_tours()
 
 
