@@ -1904,7 +1904,7 @@ func _start_new_round() -> void:
 	round_ = MahjongRound.new()
 	round_.changed.connect(_refresh)
 	round_.finished.connect(_on_round_finished)
-	# 花牌要在 start() 之前登记：满天星会给这一关多加三巡，start() 里就要算进去
+	# 花牌要在 start() 之前登记：满天星会给这一关多加两巡，start() 里就要算进去
 	round_.flowers.clear()
 	for id in _owned_flowers:
 		var effect := FlowerTiles.effect_key(id)
@@ -2449,12 +2449,10 @@ func _setup_debug_shot() -> void:
 		round_.run_opponent_turn()
 		round_.draw_tile()
 	elif "--fx" in args:
-		# 计分演出：桌上从左到右是 梨花 / 芍药 / 桃花，
-		# 所以先滚倍率（1→2），再滚底分（10→60），最后倍率再滚（2→4）
-		round_.flowers.assign(["honor_base", "discard_bonus", "combo"])
-		_owned_flowers.assign(["梨花", "芍药", "桃花"])
-		# 手里留 5 张字牌，芍药才加得动
-		round_.hand.reset([0, 3, 6, 9, 12, 15, 18, 21, 27, 28, 29, 30, 31])
+		# 计分演出：桌上从左到右是 梨花 / 水仙 / 桃花，
+		# 所以先滚倍率（1→2），再滚底分（10→30），最后倍率再滚（2→4）
+		round_.flowers.assign(["discard_bonus", "discard_base", "combo"])
+		_owned_flowers.assign(["梨花", "水仙", "桃花"])
 		round_.target_score = 9999   # 调试画面而已，别让这一张直接过关弹结算板
 		_debug_skip_first_tour()
 		round_.wall.stack_next(8, 0)   # 摸到九万

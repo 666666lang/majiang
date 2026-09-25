@@ -357,7 +357,7 @@ func _test_shop() -> void:
 	# 加成落在「每张牌的基础分」上
 	# 荷花：打出的牌牌河里已有同样的 → 这一张 ×5
 	_check_eq(FlowerTilesS.effect_key("荷花"), "repeat", "荷花登记了「牌河重张」效果")
-	_check_eq(FlowerTilesS.effect_key("菊花"), "", "没登记的花牌效果为空")
+	_check_eq(FlowerTilesS.effect_key("蒲公英"), "", "没登记的花牌效果为空")
 	var repeat_round := MahjongRoundS.new()
 	repeat_round.start(1, [], 1)
 	repeat_round.flowers.assign(["repeat"])
@@ -574,6 +574,48 @@ func _test_shop() -> void:
 	_check_eq(peony_coin.clear_coin_reward(), LevelTableS.clear_reward(1) + 9,
 		"clear_coin_reward 还是只管过关奖励 + 剩余巡")
 
+	# 水仙：每打出一次，底分 +20（无条件，牌河、手里都不看）
+	_check_eq(FlowerTilesS.effect_key("水仙"), "discard_base", "水仙登记了「打出加底分」效果")
+	_check_eq(FlowerTilesS.effect_desc("水仙"), "每打出一张牌 → 底分 +20",
+		"水仙的说明写清了")
+	_check(not FlowerTilesS.is_epic("水仙"), "水仙是普通花牌")
+	_check_eq(FlowerTilesS.price("水仙"), 12, "水仙卖 12 钱")
+	var narcissus := MahjongRoundS.new()
+	narcissus.flowers.assign(["discard_base"])
+	narcissus.start(1, [], 1)
+	narcissus.hand.reset(_parse_hand("19m 147p 1147s 123z"))
+	narcissus.discard(0)   # 第一巡直接打出一万
+	_check_eq(narcissus.last_score_base, 30, "一万本身 10 + 水仙 20 = 底分 30")
+	_check_eq(narcissus.score, 30, "倍率还是 1，这一张拿 30 分")
+	_check_eq(narcissus.last_score_base_start, 10, "水仙生效前底分是这张牌自己的 10")
+	_check_eq(narcissus.last_flower_effects.size(), 1, "水仙自己记一条效果")
+	_check_eq(narcissus.last_flower_effects[0]["key"], "discard_base", "记的是水仙")
+	_check_eq(narcissus.last_flower_effects[0]["kind"], "base", "水仙加在底分上")
+	_check_eq(narcissus.last_flower_effects[0]["delta"], 20, "水仙这一笔是 +20")
+	# 跟梨花（倍率 +1）叠起来：底分先加 20，再整体乘倍率
+	var narcissus_pear := MahjongRoundS.new()
+	narcissus_pear.flowers.assign(["discard_base", "discard_bonus"])
+	narcissus_pear.start(1, [], 1)
+	narcissus_pear.hand.reset(_parse_hand("19m 147p 1147s 123z"))
+	narcissus_pear.discard(0)
+	_check_eq(narcissus_pear.last_score_base, 30, "水仙的底分照样先加")
+	_check_eq(narcissus_pear.last_score_multiplier, 2, "梨花把倍率顶到 2")
+	_check_eq(narcissus_pear.score, 60, "(10+20) × 2 = 60")
+
+	# 菊花：每次过关 +4 钱，跟牡丹的奖励加在一起
+	_check_eq(FlowerTilesS.effect_key("菊花"), "clear_coin", "菊花登记了「过关加铜钱」效果")
+	_check_eq(FlowerTilesS.effect_desc("菊花"), "每次过关 → 铜钱 +4", "菊花的说明写清了")
+	_check(not FlowerTilesS.is_epic("菊花"), "菊花是普通花牌")
+	_check_eq(FlowerTilesS.price("菊花"), 12, "菊花卖 12 钱")
+	var juhua := MahjongRoundS.new()
+	juhua.start(1, [], 1)
+	juhua.hand.reset(_parse_hand("19m 147p 147s 12345z"))
+	_check_eq(juhua.flower_coin_bonus(), 0, "没买菊花就没有花牌奖励")
+	juhua.flowers.assign(["clear_coin"])
+	_check_eq(juhua.flower_coin_bonus(), 4, "菊花固定给 4 钱，跟手里几张字牌无关")
+	juhua.flowers.assign(["clear_coin", "honor_coin"])
+	_check_eq(juhua.flower_coin_bonus(), 4 + 20, "菊花 4 + 牡丹（5 张字牌）20 = 24 钱")
+
 	# 梅花对杠也生效
 	var plum_kong := _rig_ready(21, _parse_hand("111m 4m 7m 1p 4p 7p 1s 4s 7s 1z 3z"))
 	plum_kong.flowers.assign(["meld_double"])
@@ -637,7 +679,7 @@ func _test_shop() -> void:
 	_check_eq(win_tiles.last_score_base_start, 0, "胡牌的底分从 0 一路加到 140")
 	_check_eq(win_tiles.last_score_base, 140, "14 张牌共 140 分")
 
-	# 满天星（史诗花牌）：售价 14 钱，每一关额外多三巡
+	# 满天星（史诗花牌）：售价 15 钱，每一关额外多两巡
 	_check_eq(FlowerTilesS.effect_key("满天星"), "star", "满天星登记了效果")
 	_check(FlowerTilesS.effect_desc("满天星") != "", "满天星有说明文字")
 	_check(FlowerTilesS.is_epic("满天星"), "满天星是史诗花牌")
@@ -656,13 +698,13 @@ func _test_shop() -> void:
 	var star := MahjongRoundS.new()
 	star.flowers.assign(["star"])
 	star.start(1, [], 1)
-	_check_eq(star.total_tours, LevelTableS.tours(1) + 3, "满天星多三巡：第 1 关 13 巡")
-	_check_eq(star.remaining_tours(), 12, "第 1 关开局还剩 12 巡")
-	_check_eq(star.clear_coin_reward(), 8 + 12, "剩几巡就多给几钱，史诗花牌照样算")
+	_check_eq(star.total_tours, LevelTableS.tours(1) + 2, "满天星多两巡：第 1 关 12 巡")
+	_check_eq(star.remaining_tours(), 11, "第 1 关开局还剩 11 巡")
+	_check_eq(star.clear_coin_reward(), 8 + 11, "剩几巡就多给几钱，史诗花牌照样算")
 	var star_end := MahjongRoundS.new()
 	star_end.flowers.assign(["star"])
 	star_end.start(2, [], 24)
-	_check_eq(star_end.total_tours, LevelTableS.tours(24) + 3, "第 24 关 17+3=20 巡")
+	_check_eq(star_end.total_tours, LevelTableS.tours(24) + 2, "第 24 关 17+2=19 巡")
 	var no_star := MahjongRoundS.new()
 	no_star.start(1, [], 1)
 	_check_eq(no_star.total_tours, LevelTableS.tours(1), "没买满天星就是原本的 10 巡")
@@ -1420,7 +1462,7 @@ func _test_ui_scene_smoke() -> void:
 			_check_eq(settings.coins, 0, "界面：没达标重开要把金币清零")
 			_check(instance.get("_shop_page").visible == false, "界面：没达标点了也不会进商店")
 
-			# 满天星：商店里买下来（14 钱），下一关就要多三巡
+			# 满天星：商店里买下来（15 钱），下一关就要多两巡
 			settings.coins = 50
 			round_ref.level = 1
 			round_ref.state = MahjongRoundS.State.WON
@@ -1434,9 +1476,9 @@ func _test_ui_scene_smoke() -> void:
 			instance.call("_on_restart_pressed")
 			round_ref = instance.get("round_")
 			_check_eq(round_ref.level, 2, "界面：进第 2 关")
-			_check_eq(round_ref.total_tours, LevelTableS.tours(2) + 3, "界面：第 2 关变成 13 巡")
+			_check_eq(round_ref.total_tours, LevelTableS.tours(2) + 2, "界面：第 2 关变成 12 巡")
 			_check_eq(round_ref.flowers.has("star"), true, "界面：花牌效果带进了新一关")
-			_check_eq(instance.get("_remain_value").text, "12 巡", "界面：分数牌上写 12 巡")
+			_check_eq(instance.get("_remain_value").text, "11 巡", "界面：分数牌上写 11 巡")
 
 			# 飘分板停一会儿要自己收起来（帧率不定，给足次数）
 			var waited := 0

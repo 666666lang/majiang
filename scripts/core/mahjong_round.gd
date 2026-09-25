@@ -36,7 +36,9 @@ const DISCARD_FLOWER_BONUS := 1             # 梨花：每一次打出都 +1 倍
 const PAIR_FLOWER_BONUS := 4                # 百合：打出去之后手上还有同款 → +4
 const HONOR_FLOWER_BASE := 10               # 芍药：手里每有一张字牌，打出的底分 +10
 const HONOR_FLOWER_COIN := 4                # 牡丹：过关时手里每有一张字牌，多给 4 钱
-const STAR_FLOWER_EXTRA_TOURS := 3          # 满天星（史诗）：每一关多给三巡
+const DISCARD_BASE_FLOWER := 20             # 水仙：每打出一次，底分 +20
+const CLEAR_COIN_FLOWER := 4                # 菊花：每次过关，多给 4 钱
+const STAR_FLOWER_EXTRA_TOURS := 2          # 满天星（史诗）：每一关多给两巡
 ## 胡牌的计分倍数：全部牌的分值相加再乘下面这个数，三种胡法各自一档
 const WIN_SCORE_MULTIPLIER := 10        # 荣和（胡别人打出的牌）
 const TSUMO_SCORE_MULTIPLIER := 20      # 自摸
@@ -225,12 +227,19 @@ func discard(index: int) -> int:
 	# 哪些花牌在这一张牌上起了作用。界面拿它演「花牌跳一下 + 底下冒出 +1 倍率」
 	var effects: Array[Dictionary] = []
 	var base_note := ""
+	# 水仙：每打出一次就 +20 底分，不用看牌河也不用看手里
+	if has_flower("discard_base"):
+		base += DISCARD_BASE_FLOWER
+		base_note = "（水仙底分 +%d）" % DISCARD_BASE_FLOWER
+		effects.append({"key": "discard_base",
+			"text": "+%d 底分" % DISCARD_BASE_FLOWER,
+			"kind": "base", "delta": DISCARD_BASE_FLOWER})
 	# 芍药：打完之后手里还剩几张字牌，底分就加几个 10（底分先加、之后才乘倍率）
 	if has_flower("honor_base"):
 		var honors := hand_honor_count()
 		if honors > 0:
 			base += honors * HONOR_FLOWER_BASE
-			base_note = "（%d 张字牌，芍药底分 +%d）" % [honors, honors * HONOR_FLOWER_BASE]
+			base_note += "（%d 张字牌，芍药底分 +%d）" % [honors, honors * HONOR_FLOWER_BASE]
 			effects.append({"key": "honor_base",
 				"text": "+%d 底分" % (honors * HONOR_FLOWER_BASE),
 				"kind": "base", "delta": honors * HONOR_FLOWER_BASE})
@@ -512,10 +521,13 @@ func hand_honor_count() -> int:
 
 
 func flower_coin_bonus() -> int:
-	## 牡丹：过关的时候，手里每有一张字牌多给 4 钱
-	if not has_flower("honor_coin"):
-		return 0
-	return hand_honor_count() * HONOR_FLOWER_COIN
+	## 过关时的花牌奖励：牡丹按手里字牌算，菊花是固定的 4 钱
+	var bonus := 0
+	if has_flower("honor_coin"):
+		bonus += hand_honor_count() * HONOR_FLOWER_COIN
+	if has_flower("clear_coin"):
+		bonus += CLEAR_COIN_FLOWER
+	return bonus
 
 
 func meld_score_multiplier(base: int) -> int:

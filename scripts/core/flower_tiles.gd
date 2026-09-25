@@ -36,18 +36,24 @@ const EFFECT_KEYS := {
 	"shaoyao": "honor_base",
 	"牡丹": "honor_coin",
 	"mudan": "honor_coin",
+	"水仙": "discard_base",
+	"shuixian": "discard_base",
+	"菊花": "clear_coin",
+	"juhua": "clear_coin",
 }
 ## 效果代号对应的说明文字（也给商店显示用）
 const EFFECT_DESCS := {
 	"combo": "打出的就是刚摸到的那张 → 倍率 +2",
 	"repeat": "打出时牌河已有同样的牌 → 倍率 +4",
-	"star": "每关额外增加 3 巡",
+	"star": "每关额外增加 2 巡",
 	"violet": "每关开始可弃牌摸等量",
 	"meld_double": "碰、杠的倍率 ×2",
 	"discard_bonus": "打出牌 → 倍率 +1",
 	"pair_bonus": "打出后手牌里还有同样的牌 → 倍率 +4",
 	"honor_base": "手里每有一张字牌，打出的底分 +10",
 	"honor_coin": "过关时手里每有一张字牌 → 铜钱 +4",
+	"discard_base": "每打出一张牌 → 底分 +20",
+	"clear_coin": "每次过关 → 铜钱 +4",
 }
 
 ## 图片最长边超过这个值就先缩下来。原图动辄 1300×2000，
