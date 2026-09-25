@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://6ehjetpjbyk"
-path="res://.godot/imported/荷花.png-91f6c9cd0db7122c82a5942388eb0c1c.ctex"
+uid="uid://xc4fgrvrdah4"
+path="res://.godot/imported/refreshButton.png-3a6a152f02623865930f33aeb8af6d82.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/tiles/flowers/荷花.png"
-dest_files=["res://.godot/imported/荷花.png-91f6c9cd0db7122c82a5942388eb0c1c.ctex"]
+source_file="res://assets/ui/refreshButton.png"
+dest_files=["res://.godot/imported/refreshButton.png-3a6a152f02623865930f33aeb8af6d82.ctex"]
 
 [params]
 

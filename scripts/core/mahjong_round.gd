@@ -32,6 +32,9 @@ const CONCEALED_KONG_SCORE_MULTIPLIER := 6  # 暗杠的计分倍数（自己扣�
 const REPEAT_FLOWER_BONUS := 4              # 荷花：牌河里已有同样的牌 → 倍率 +4
 const COMBO_FLOWER_BONUS := 2               # 桃花：打的就是刚摸到的牌 → 倍率 +2
 const MELD_FLOWER_MULTIPLIER := 2           # 梅花：碰、杠的倍率再翻一倍（×2 的碰变成 ×4）
+const DISCARD_FLOWER_BONUS := 1             # 梨花：每一次打出都 +1 倍率（单出就是 ×2）
+const PAIR_FLOWER_BONUS := 4                # 百合：打出去之后手上还有同款 → +4
+const HONOR_FLOWER_BASE := 10               # 芍药：手里每有一张字牌，打出的底分 +10
 const STAR_FLOWER_EXTRA_TOURS := 3          # 满天星（史诗）：每一关多给三巡
 ## 胡牌的计分倍数：全部牌的分值相加再乘下面这个数，三种胡法各自一档
 const WIN_SCORE_MULTIPLIER := 10        # 荣和（胡别人打出的牌）
@@ -80,19 +83,29 @@ var last_score_reason: String = "" # 最近一次得分的来源
 ## 最近一次得分的「底数」和「倍率」——界面弹分数时这两个是分开显示的
 var last_score_base: int = 0
 var last_score_multiplier: int = 1
+## 同一笔得分里，花牌生效「之前」的底数和倍率。界面靠它演数字的变化过程：
+## 先把 10 亮出来，花牌跳一下再滚成 20
+var last_score_base_start: int = 0
+var last_score_multiplier_start: int = 1
+## 最近一次得分里，哪些花牌起了作用：
+## [{"key": 效果代号, "text": "给玩家看的字样", "kind": "base"/"mult", "delta": 加了多少}]
+## 界面拿它演"花牌跳一下 + 冒出 +1倍率"，跟小丑牌一个路子
+var last_flower_effects: Array[Dictionary] = []
 ## 得分次数。界面靠它判断「又得了一次分」，跟得多少无关
 var score_serial: int = 0
 var _ai_discards_pending: int = 0
 var _ai_discards_shown_from: int = 0  # 本轮电脑出牌在 ai_discards 里的起点
 
 
-func start(seed_value: int = 0, preset: Array = [], level_value: int = 1) -> void:
+func start(seed_value: int = 0, preset: Array = [], level_value: int = 1,
+		deck: Array = []) -> void:
 	## preset 只给测试用：指定起手那 14 张（牌墙照样按发牌张数前进）
+	## deck 是本局的牌库（删过牌之后就不是 136 张了）；不传就用标准牌库
 	level = clampi(level_value, 1, LevelTable.MAX_LEVEL)
 	target_score = LevelTable.target_score(level)
 	total_tours = LevelTable.tours(level) + flower_extra_tours()
 	rng_seed = seed_value
-	wall = MahjongWall.new(seed_value)
+	wall = MahjongWall.new(seed_value, deck)
 	hand = PlayerHand.new()
 	discards = []
 	ai_discards = []
@@ -202,19 +215,54 @@ func discard(index: int) -> int:
 	var base := tile_score(tile)
 	var bonus := 0
 	var notes := PackedStringArray()
+	# 哪些花牌在这一张牌上起了作用。界面拿它演「花牌跳一下 + 底下冒出 +1 倍率」
+	var effects: Array[Dictionary] = []
+	var base_note := ""
+	# 芍药：打完之后手里还剩几张字牌，底分就加几个 10（底分先加、之后才乘倍率）
+	if has_flower("honor_base"):
+		var honors := 0
+		for owned in hand.tiles:
+			if TileCodec.is_honor(owned):
+				honors += 1
+		if honors > 0:
+			base += honors * HONOR_FLOWER_BASE
+			base_note = "（%d 张字牌，芍药底分 +%d）" % [honors, honors * HONOR_FLOWER_BASE]
+			effects.append({"key": "honor_base",
+				"text": "+%d 底分" % (honors * HONOR_FLOWER_BASE),
+				"kind": "base", "delta": honors * HONOR_FLOWER_BASE})
+	# 梨花：打出任何一张牌都 +1，最省心的那一档
+	if has_flower("discard_bonus"):
+		bonus += DISCARD_FLOWER_BONUS
+		notes.append("梨花 +%d" % DISCARD_FLOWER_BONUS)
+		effects.append({"key": "discard_bonus",
+			"text": "+%d 倍率" % DISCARD_FLOWER_BONUS,
+			"kind": "mult", "delta": DISCARD_FLOWER_BONUS})
 	if repeat_in_pile and has_flower("repeat"):
 		bonus += REPEAT_FLOWER_BONUS
 		notes.append("牌河已有同样的 +%d" % REPEAT_FLOWER_BONUS)
+		effects.append({"key": "repeat",
+			"text": "+%d 倍率" % REPEAT_FLOWER_BONUS,
+			"kind": "mult", "delta": REPEAT_FLOWER_BONUS})
 	# 桃花：只要打的是刚摸到的那张就给，不连击、不看之前打过什么
 	if from_draw and has_flower("combo"):
 		bonus += COMBO_FLOWER_BONUS
 		notes.append("打的是刚摸到的 +%d" % COMBO_FLOWER_BONUS)
+		effects.append({"key": "combo",
+			"text": "+%d 倍率" % COMBO_FLOWER_BONUS,
+			"kind": "mult", "delta": COMBO_FLOWER_BONUS})
+	# 百合：打出去之后，手上还剩同样的牌（弃掉的这张已经从手牌里拿走了）
+	if has_flower("pair_bonus") and hand.tiles.has(tile):
+		bonus += PAIR_FLOWER_BONUS
+		notes.append("手上还有同款 +%d" % PAIR_FLOWER_BONUS)
+		effects.append({"key": "pair_bonus",
+			"text": "+%d 倍率" % PAIR_FLOWER_BONUS,
+			"kind": "mult", "delta": PAIR_FLOWER_BONUS})
 	var multiplier := 1 + bonus
-	var reason := "打出 %s" % TileCodec.display_name(tile)
+	var reason := "打出 %s%s" % [TileCodec.display_name(tile), base_note]
 	if bonus > 0:
 		reason += " ×%d（%s）" % [multiplier, "，".join(notes)]
 	var gained := base * multiplier
-	_add_score_parts(base, multiplier, reason)
+	_add_score_parts(base, multiplier, reason, effects)
 	score_from_discards += gained
 
 	# 这一张打出去刚好达标，本关就到此为止，不用再轮到电脑
@@ -361,7 +409,7 @@ func declare_pong() -> bool:
 	var gained := each * 3 * pong_multiplier
 	_add_score_parts(each * 3, pong_multiplier, "碰 %s（%d+%d+%d）×%d%s" % [
 		TileCodec.display_name(tile), each, each, each, pong_multiplier, meld_flower_note(),
-	])
+	], meld_flower_effects(PONG_SCORE_MULTIPLIER))
 	score_from_pongs += gained
 
 	_take_claimed_tile_from_discards()
@@ -396,7 +444,7 @@ func declare_kong() -> bool:
 	var gained := each * 4 * kong_multiplier
 	_add_score_parts(each * 4, kong_multiplier, "杠 %s（%d+%d+%d+%d）×%d%s" % [
 		TileCodec.display_name(tile), each, each, each, each, kong_multiplier, meld_flower_note(),
-	])
+	], meld_flower_effects(KONG_SCORE_MULTIPLIER))
 	score_from_kongs += gained
 
 	_take_claimed_tile_from_discards()
@@ -457,6 +505,18 @@ func meld_score_multiplier(base: int) -> int:
 func meld_flower_note() -> String:
 	## 结算文案里标一下梅花起了作用
 	return "（梅花 ×%d）" % MELD_FLOWER_MULTIPLIER if has_flower("meld_double") else ""
+
+
+func meld_flower_effects(base_multiplier: int) -> Array[Dictionary]:
+	## 碰 / 杠时梅花起的加成（倍率从 base_multiplier 再翻一倍），交给界面演花牌动画
+	if not has_flower("meld_double"):
+		return []
+	return [{
+		"key": "meld_double",
+		"text": "×%d 倍率" % MELD_FLOWER_MULTIPLIER,
+		"kind": "mult",
+		"delta": base_multiplier * (MELD_FLOWER_MULTIPLIER - 1),
+	}]
 
 
 # ---------------------------------------------------------------- 紫罗兰：每关（回合）开局换牌
@@ -563,7 +623,7 @@ func declare_concealed_kong() -> bool:
 	_add_score_parts(each * 4, concealed_multiplier, "暗杠 %s（%d+%d+%d+%d）×%d%s" % [
 		TileCodec.display_name(tile), each, each, each, each, concealed_multiplier,
 		meld_flower_note(),
-	])
+	], meld_flower_effects(CONCEALED_KONG_SCORE_MULTIPLIER))
 	score_from_kongs += gained
 	last_drawn = -1
 	_draw_after_kong()
@@ -615,13 +675,25 @@ func _add_score(gained: int, reason: String) -> void:
 	_add_score_parts(gained, 1, reason)
 
 
-func _add_score_parts(base: int, multiplier: int, reason: String) -> void:
+func _add_score_parts(base: int, multiplier: int, reason: String,
+		effects: Array = []) -> void:
 	## 带倍率的得分：底数和倍率分开记，界面就能显示成「30 × 2」
 	score += base * multiplier
 	last_score_gain = base * multiplier
 	last_score_reason = reason
 	last_score_base = base
 	last_score_multiplier = multiplier
+	last_flower_effects.assign(effects)
+	# 界面要演「数字从多少变成多少」：把花牌的加往回倒推一步，
+	# 就得到花牌生效之前的底数和倍率（没花牌生效时两者相等）
+	last_score_base_start = base
+	last_score_multiplier_start = multiplier
+	for effect in last_flower_effects:
+		var delta := int(effect.get("delta", 0))
+		if str(effect.get("kind", "mult")) == "base":
+			last_score_base_start -= delta
+		else:
+			last_score_multiplier_start -= delta
 	score_serial += 1
 
 

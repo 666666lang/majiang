@@ -25,6 +25,10 @@ const DEAL_DROP := 66.0    # 发牌时从多高处落下来
 const DEAL_TIME := 0.3     # 落下来的时间
 const DRAW_DROP := 54.0    # 摸牌时从多高处落到手上
 const DRAW_TIME := 0.24
+const JUMP_HEIGHT := 20.0  # 花牌生效时往上跳多高（牌桌顶上那行花牌贴边，跳太高会被屏幕裁掉）
+const JUMP_TIME := 0.16    # 跳上去的时间
+const JUMP_FALL := 0.26    # 落回来的时间
+const JUMP_SCALE := 1.10   # 跳的时候顺带放大一点，跳完回原样
 
 var kind: int = -1
 var selected: bool = false
@@ -196,6 +200,33 @@ func play_drop(from_height: float, duration: float, delay: float = 0.0) -> void:
 		.set_delay(delay).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
 
 
+func play_jump() -> void:
+	## 花牌生效时跳一下：先弹上去、再落回原位，顺带放大一点点。
+	## 走 _stack 的偏移，不会跟容器排版打架。
+	if _stack == null or not is_inside_tree():
+		return
+	if _tween != null and _tween.is_valid():
+		_tween.kill()
+	pivot_offset = _tile_size * 0.5
+	_stack.offset_top = 0.0
+	_stack.offset_bottom = 0.0
+
+	_tween = create_tween()
+	_tween.set_parallel(true)
+	_tween.tween_property(_stack, "offset_top", -JUMP_HEIGHT, JUMP_TIME) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_tween.tween_property(_stack, "offset_bottom", -JUMP_HEIGHT, JUMP_TIME) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_tween.tween_property(self, "scale", Vector2(JUMP_SCALE, JUMP_SCALE), JUMP_TIME)
+	_tween.set_parallel(false)
+	_tween.tween_property(_stack, "offset_top", 0.0, JUMP_FALL) \
+		.set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+	_tween.parallel().tween_property(_stack, "offset_bottom", 0.0, JUMP_FALL) \
+		.set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+	_tween.parallel().tween_property(self, "scale", Vector2.ONE, JUMP_FALL) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+
 # ---------------------------------------------------------------- 状态
 
 func _on_hover_changed(value: bool) -> void:
@@ -242,12 +273,12 @@ func _apply_state() -> void:
 		edge_width = 3.0
 
 	var inset := _tile_size.x * 0.1
+	_body.visible = true
 	_face.offset_left = inset
 	_face.offset_top = inset
 	_face.offset_right = -inset
 	_face.offset_bottom = -(inset + _thickness)
 	_face.setup(kind, face_down, _flower_texture)
-
 	_body.configure(face, face.darkened(0.32), edge, edge_width, _thickness, _hovered)
 	_apply_lift()
 

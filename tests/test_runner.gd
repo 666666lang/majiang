@@ -35,6 +35,7 @@ func _run() -> void:
 	_test_kong()
 	_test_concealed_kong()
 	_test_violet_swap()
+	_test_deck()
 	_test_scoring()
 	_test_seeded_round_is_deterministic()
 	await _test_ui_scene_smoke()
@@ -242,9 +243,13 @@ func _test_levels() -> void:
 	_check_eq(LevelTableS.target_score(10), 800, "第 10 关目标 800 分（这里跳到 +200）")
 	_check_eq(LevelTableS.target_score(11), 1000, "第 11 关目标 1000 分")
 	_check_eq(LevelTableS.target_score(12), 1200, "第 12 关目标 1200 分")
-	_check_eq(LevelTableS.target_score(13), 1400, "第 13 关目标 1400 分")
-	_check_eq(LevelTableS.target_score(23), 3400, "第 23 关目标 3400 分")
-	_check_eq(LevelTableS.target_score(24), 3600, "第 24 关目标 3600 分")
+	_check_eq(LevelTableS.target_score(13), 1500, "第 13 关目标 1500 分（这里跳到 +300）")
+	_check_eq(LevelTableS.target_score(14), 1800, "第 14 关目标 1800 分")
+	_check_eq(LevelTableS.target_score(15), 2100, "第 15 关目标 2100 分")
+	_check_eq(LevelTableS.target_score(16), 2500, "第 16 关目标 2500 分（这里跳到 +500）")
+	_check_eq(LevelTableS.target_score(17), 3000, "第 17 关目标 3000 分")
+	_check_eq(LevelTableS.target_score(23), 6000, "第 23 关目标 6000 分")
+	_check_eq(LevelTableS.target_score(24), 6500, "第 24 关目标 6500 分")
 
 	_check_eq(LevelTableS.tours(1), 10, "第 1 关 10 巡")
 	_check_eq(LevelTableS.tours(3), 10, "第 3 关还是 10 巡")
@@ -281,7 +286,7 @@ func _test_levels() -> void:
 	# 巡数用完还没达标 → 本关失败
 	var failed := MahjongRoundS.new()
 	failed.start(7, [], 24)
-	_check_eq(failed.target_score, 3600, "第 24 关目标 3600 分")
+	_check_eq(failed.target_score, 6500, "第 24 关目标 6500 分")
 	_check_eq(failed.total_tours, 17, "第 24 关 17 巡")
 	# 全孤张：碰不上、杠不上、也胡不了，只能靠打出的每巡 10 分
 	failed.hand.reset(_parse_hand("147m 147p 147s 1257z 3z"))
@@ -295,7 +300,7 @@ func _test_levels() -> void:
 	_check_eq(failed.state, MahjongRoundS.State.LOST, "17 巡打完没达标 → 失败")
 	_check_eq(failed.score, 170, "只拿到打出的 17 × 10 = 170 分")
 	_check_eq(failed.tour, 17, "打满 17 巡")
-	_check_eq(failed.result_text, "17 巡打完 · 170 分（目标 3600 分）", "失败文案写清差距")
+	_check_eq(failed.result_text, "17 巡打完 · 170 分（目标 6500 分）", "失败文案写清差距")
 
 	# 换个低关口：同样的打法也能过关（第 1 关只要 100 分）
 	var passed := MahjongRoundS.new()
@@ -421,6 +426,134 @@ func _test_shop() -> void:
 	_check(plum.declare_pong(), "梅花在手照样能碰")
 	_check_eq(plum.last_score_multiplier, 4, "碰的倍率从 ×2 翻成 ×4")
 	_check_eq(plum.score_from_pongs, 120, "碰的计分：(10+10+10)×4 = 120")
+	_check_eq(plum.last_flower_effects.size(), 1, "梅花在碰的时候记一条效果")
+	_check_eq(plum.last_flower_effects[0]["key"], "meld_double", "记的是梅花")
+	_check_eq(plum.last_flower_effects[0]["text"], "×2 倍率", "梅花的字样是 ×2 倍率")
+	# 梅花的倍率是「再翻一倍」：飘分板上的倍率要从 2 滚到 4
+	_check_eq(plum.last_flower_effects[0]["kind"], "mult", "梅花加在倍率上")
+	_check_eq(plum.last_flower_effects[0]["delta"], 2, "碰的倍率从 2 涨到 4")
+	_check_eq(plum.last_score_multiplier_start, 2, "梅花生效前倍率是碰本身的 2")
+
+	# 梨花：打出任何一张牌都 +1 倍率
+	_check_eq(FlowerTilesS.effect_key("梨花"), "discard_bonus", "梨花登记了「打出 +1」效果")
+	_check_eq(FlowerTilesS.effect_desc("梨花"), "打出牌 → 倍率 +1", "梨花的说明写清了")
+	_check(not FlowerTilesS.is_epic("梨花"), "梨花是普通花牌")
+	var pear := MahjongRoundS.new()
+	pear.flowers.assign(["discard_bonus"])
+	pear.start(1, [], 1)
+	pear.hand.reset(_parse_hand("19m 147p 1147s 123z"))
+	pear.discard(0)   # 第一巡直接打出：牌河空的、也不是摸到的，只有梨花生效
+	_check_eq(pear.last_score_multiplier, 2, "梨花单独生效：倍率 ×2")
+	_check_eq(pear.score, 20, "打一张一万拿 10 × 2 = 20 分")
+
+	# 百合：打出后手里还有同样的牌 → +4
+	_check_eq(FlowerTilesS.effect_key("百合"), "pair_bonus", "百合登记了「手上还有同款」效果")
+	_check_eq(FlowerTilesS.effect_desc("百合"), "打出后手牌里还有同样的牌 → 倍率 +4",
+		"百合的说明写清了")
+	_check(not FlowerTilesS.is_epic("百合"), "百合是普通花牌")
+	var lily := MahjongRoundS.new()
+	lily.flowers.assign(["pair_bonus"])
+	lily.start(1, [], 1)
+	lily.hand.reset(_parse_hand("119m 147p 1147s 123z"))   # 两张一万
+	lily.discard(0)                                        # 打掉一张，手里还剩一张
+	_check_eq(lily.last_score_multiplier, 5, "手上还有同款 → 倍率 ×5")
+	_check_eq(lily.score, 50, "10 × 5 = 50")
+
+	# 手里没有同款就不给加成
+	var lily_none := MahjongRoundS.new()
+	lily_none.flowers.assign(["pair_bonus"])
+	lily_none.start(1, [], 1)
+	lily_none.hand.reset(_parse_hand("19m 147p 1147s 12345z"))   # 一万只有一张
+	lily_none.discard(0)
+	_check_eq(lily_none.last_score_multiplier, 1, "手里没有同款 → 没有加成")
+
+	# 芍药：手里每有一张字牌，打出的底分 +10（先加底分，再乘倍率）
+	_check_eq(FlowerTilesS.effect_key("芍药"), "honor_base", "芍药登记了「字牌加底分」效果")
+	_check_eq(FlowerTilesS.effect_desc("芍药"), "手里每有一张字牌，打出的底分 +10",
+		"芍药的说明写清了")
+	_check(not FlowerTilesS.is_epic("芍药"), "芍药是普通花牌")
+	var peony := MahjongRoundS.new()
+	peony.flowers.assign(["honor_base"])
+	peony.start(1, [], 1)
+	peony.hand.reset(_parse_hand("19m 147p 147s 12345z"))   # 5 张字牌
+	peony.discard(0)                                        # 打一张一万（不是字牌）
+	_check_eq(peony.last_score_base, 60, "手里 5 张字牌 → 底分 10 + 50 = 60")
+	_check_eq(peony.score, 60, "倍率 1，所以这张拿 60 分")
+
+	# 底分先加、再乘倍率：芍药 + 桃花
+	var peony_combo := MahjongRoundS.new()
+	peony_combo.flowers.assign(["honor_base", "combo"])
+	peony_combo.start(1, [], 1)
+	peony_combo.hand.reset(_parse_hand("19m 147p 147s 12345z"))
+	peony_combo.discard(0)                                  # 第一巡先打一张一万（不是字牌）
+	peony_combo.run_opponent_turn()
+	peony_combo.wall.stack_next(8, 0)                       # 摸到九万，也不是字牌
+	peony_combo.draw_tile()
+	peony_combo.discard(peony_combo.hand.tiles.size())      # 打摸到的：桃花 +2
+	# 打完之后手里 5 张字牌（打的不是字牌）→ 底分 60，倍率 1+2 = 3
+	_check_eq(peony_combo.last_score_base, 60, "底分还是 60")
+	_check_eq(peony_combo.last_score_multiplier, 3, "桃花让倍率变 ×3")
+
+	# 梨花和桃花同时中：1（基准）+ 1（梨花）+ 2（桃花）= 4
+	var pear_combo := MahjongRoundS.new()
+	pear_combo.flowers.assign(["discard_bonus", "combo"])
+	pear_combo.start(1, [], 1)
+	pear_combo.hand.reset(_parse_hand("19m 147p 1147s 123z"))
+	pear_combo.discard(pear_combo.hand.tiles.size() - 1)
+	_check_eq(pear_combo.last_score_multiplier, 2, "第一巡只有梨花：×2")
+	pear_combo.run_opponent_turn()
+	pear_combo.draw_tile()
+	pear_combo.discard(pear_combo.hand.tiles.size())
+	_check_eq(pear_combo.last_score_multiplier, 4, "梨花 + 桃花 → 倍率 4")
+
+	# 计分动画要用「这次哪几张花牌起了作用」：梨花 + 桃花 → 两条记录，字号也对
+	_check_eq(pear_combo.last_flower_effects.size(), 2, "梨花和桃花各记一条")
+	_check_eq(pear_combo.last_flower_effects[0]["key"], "discard_bonus",
+		"第一条记的是梨花")
+	_check_eq(pear_combo.last_flower_effects[0]["text"], "+1 倍率", "梨花的字样是 +1 倍率")
+	_check_eq(pear_combo.last_flower_effects[1]["key"], "combo", "第二条记的是桃花")
+	_check_eq(pear_combo.last_flower_effects[1]["text"], "+2 倍率", "桃花的字样是 +2 倍率")
+	# 飘分板要演「数字从多少变成多少」：记下花牌生效之前的倍数
+	_check_eq(pear_combo.last_score_multiplier_start, 1, "花牌生效前倍率是 1")
+	_check_eq(pear_combo.last_score_multiplier, 4, "花牌生效后是 4")
+	_check_eq(pear_combo.last_score_base_start, 10, "这两朵花不加底分，底分前后都是 10")
+	_check_eq(pear_combo.last_flower_effects[1]["kind"], "mult", "桃花标的是加在倍率上")
+	_check_eq(pear_combo.last_flower_effects[1]["delta"], 2, "桃花这一笔是 +2")
+
+	# 花牌没触发的时候不留记录，界面就不会乱跳
+	var plain := MahjongRoundS.new()
+	plain.flowers.assign(["discard_bonus"])
+	plain.start(1, [], 1)
+	plain.hand.reset(_parse_hand("19m 147p 1147s 123z"))
+	plain.discard(plain.hand.tiles.size() - 1)   # 第一巡：只有梨花会中
+	_check_eq(plain.last_flower_effects.size(), 1, "头一手只有梨花起作用")
+	plain.run_opponent_turn()
+	plain.draw_tile()
+	plain.discard(0)                             # 打手牌：没有摸打加成
+	_check_eq(plain.last_flower_effects.size(), 1, "还是只有梨花那一条")
+	_check_eq(plain.last_flower_effects[0]["key"], "discard_bonus", "记的还是梨花")
+
+	# 一朵花都没有的时候，一张记录都不留（飘分板直接出来，不演花牌）
+	var bare := MahjongRoundS.new()
+	bare.start(1, [], 1)
+	bare.hand.reset(_parse_hand("19m 147p 1147s 123z"))
+	bare.discard(0)
+	_check(bare.last_flower_effects.is_empty(), "没买花牌就不记花牌效果")
+
+	# 芍药加的是底分，字样要写成「+N 底分」
+	var peony_fx := MahjongRoundS.new()
+	peony_fx.flowers.assign(["honor_base"])
+	peony_fx.start(1, [], 1)
+	peony_fx.hand.reset(_parse_hand("19m 147p 147s 12345z"))   # 5 张字牌
+	peony_fx.discard(0)
+	_check_eq(peony_fx.last_flower_effects.size(), 1, "芍药自己一条记录")
+	_check_eq(peony_fx.last_flower_effects[0]["key"], "honor_base", "记的是芍药")
+	_check_eq(peony_fx.last_flower_effects[0]["text"], "+50 底分", "5 张字牌 → +50 底分")
+	_check_eq(peony_fx.last_flower_effects[0]["kind"], "base", "芍药标的是加在底分上")
+	_check_eq(peony_fx.last_flower_effects[0]["delta"], 50, "芍药这一笔是 +50")
+	_check_eq(peony_fx.last_score_base_start, 10, "芍药生效前底分是这张牌自己的 10")
+	_check_eq(peony_fx.last_score_base, 60, "芍药生效后底分是 60")
+	_check_eq(peony_fx.last_score_multiplier_start, 1, "芍药不动倍率")
 
 	# 梅花对杠也生效
 	var plum_kong := _rig_ready(21, _parse_hand("111m 4m 7m 1p 4p 7p 1s 4s 7s 1z 3z"))
@@ -434,6 +567,17 @@ func _test_shop() -> void:
 	_check(plum_kong.declare_kong(), "梅花在手照样能杠")
 	_check_eq(plum_kong.last_score_multiplier, 10, "杠的倍率从 ×5 翻成 ×10")
 	_check_eq(plum_kong.score_from_kongs, 400, "杠的计分：(10+10+10+10)×10 = 400")
+	_check_eq(plum_kong.last_score_multiplier_start, 5, "杠本身是 ×5，梅花再翻成 ×10")
+
+	# 没有花牌生效 / 胡牌这种没花牌参与的得分：前后数字一样，飘分板不用滚
+	var none_start := MahjongRoundS.new()
+	none_start.start(1, [], 1)
+	none_start.hand.reset(_parse_hand("19m 147p 1147s 123z"))
+	none_start.discard(0)
+	_check_eq(none_start.last_score_base_start, none_start.last_score_base,
+		"没花牌生效时底分前后一样")
+	_check_eq(none_start.last_score_multiplier_start, none_start.last_score_multiplier,
+		"没花牌生效时倍率前后一样")
 
 	# 满天星（史诗花牌）：售价 14 钱，每一关额外多三巡
 	_check_eq(FlowerTilesS.effect_key("满天星"), "star", "满天星登记了效果")
@@ -868,6 +1012,32 @@ func _test_violet_swap() -> void:
 	_check_eq(heavenly.swapped, [11] as Array[int], "弃置区里记着三筒")
 
 
+func _test_deck() -> void:
+	print("牌库与删牌")
+	# 不指定牌库：还是标准 136 张
+	var full := MahjongWallS.new(7)
+	_check_eq(full.total(), 136, "默认牌库是 136 张")
+	# 指定牌库：就是删过牌之后的样子
+	var small := MahjongWallS.new(7, [0, 0, 1, 1])
+	_check_eq(small.total(), 4, "可以指定牌库（这里 4 张）")
+	var drawn: Array = []
+	for i in 9:
+		drawn.append(small.draw())
+	var all_from_deck := true
+	for tile in drawn:
+		if tile != 0 and tile != 1:
+			all_from_deck = false
+	_check(all_from_deck and not drawn.has(-1),
+		"一副摸完了会自动重洗，摸出来的始终是牌库里的牌")
+	# 对局直接用传进来的牌库
+	var round_ := MahjongRoundS.new()
+	var deck: Array = []
+	for i in 20:
+		deck.append(i % TileCodecS.KIND_COUNT)
+	round_.start(7, [], 1, deck)
+	_check_eq(round_.wall.total(), 20, "对局用的就是传进来的牌库")
+
+
 func _test_scoring() -> void:
 	print("计分")
 	_check_eq(TileCodecS.base_score(0), 10, "每张牌基础分是 10 分")
@@ -1115,6 +1285,48 @@ func _test_ui_scene_smoke() -> void:
 				"界面：气泡里不写名字也不写价格")
 			instance.call("_hide_item_popup")
 			_check_eq(bubble.visible, false, "界面：气泡能收起来")
+
+			# 刷新按钮：第一次 1 钱，之后每次 +1 钱；重进商店重置回 1
+			settings.coins = 30
+			instance.call("_show_shop")
+			var refresh_price: Label = instance.get("_shop_refresh_price")
+			_check_eq(refresh_price.text, "1 钱", "界面：刷新第一次要 1 钱")
+			instance.call("_on_refresh_pressed")
+			_check_eq(settings.coins, 29, "界面：刷新扣掉 1 钱")
+			_check_eq(refresh_price.text, "2 钱", "界面：第二次刷新要 2 钱")
+			instance.call("_on_refresh_pressed")
+			_check_eq(settings.coins, 27, "界面：第二次刷新扣掉 2 钱")
+			_check_eq(refresh_price.text, "3 钱", "界面：第三次刷新要 3 钱")
+			instance.call("_show_shop")
+			_check_eq(refresh_price.text, "1 钱", "界面：重新进商店，刷新价重置回 1 钱")
+			# 刷新音效：assets/audio/effect/refresh.mp3
+			var sfx: Node = root.get_node_or_null("Sfx")
+			_check(sfx != null and sfx.call("has_sound", "refresh"),
+				"界面：刷新音效 refresh.mp3 能找到")
+
+			# 删牌：弹窗铺出整个牌库，选 4 张删掉，牌库跨关继承
+			instance.call("_show_shop")
+			var deck: Array = instance.get("_deck")
+			_check_eq(deck.size(), 136, "界面：牌库一开始是 136 张")
+			instance.call("_open_delete_popup")
+			_check_eq(instance.get("_delete_overlay").visible, true, "界面：点删除弹出删牌弹窗")
+			var grid: GridContainer = instance.get("_delete_grid")
+			_check_eq(grid.get_child_count(), 136, "界面：弹窗里铺出整个牌库")
+			for i in 5:
+				instance.call("_on_delete_tile_pressed", i)
+			_check_eq(instance.get("_delete_selection").size(), 4, "界面：最多只能选 4 张")
+			instance.call("_on_delete_confirm_pressed")
+			_check_eq(deck.size(), 132, "界面：删掉 4 张后牌库剩 132")
+			_check_eq(instance.get("_delete_overlay").visible, false, "界面：删完自动关掉弹窗")
+			_check_eq(instance.get("_shop_delete_button").disabled, true,
+				"界面：这次进商店不能删第二次")
+			round_ref.state = MahjongRoundS.State.WON
+			instance.call("_on_restart_pressed")
+			round_ref = instance.get("round_")
+			_check_eq(round_ref.wall.total(), 132, "界面：下一关的牌墙就是删过的牌库")
+			# 把局面还原，免得影响后面「过关进下一关」那条用例
+			round_ref.level = 1
+			round_ref.state = MahjongRoundS.State.WON
 			instance.call("_show_settlement", true)
 			settings.coins = 50
 			instance.call("_on_restart_pressed")
@@ -1199,6 +1411,66 @@ func _test_ui_scene_smoke() -> void:
 			_check_eq(flower_row.get_child(0).custom_minimum_size,
 				instance.get("_tile_row").get_child(0).custom_minimum_size,
 				"界面：牌桌上花牌跟手牌一样大")
+
+			# 计分动画：花牌跳一下、底下冒出「+N 倍率」
+			var fx_key: String = FlowerTilesS.effect_key("荷花")
+			var fx_tile: Variant = instance.call("_flower_widget_for", fx_key)
+			_check(fx_tile != null, "界面：按效果代号找得到对应的花牌")
+			if fx_tile != null:
+				instance.call("_flash_flower_effect", {"key": fx_key, "text": "+4 倍率"})
+				await process_frame   # 跳是个补间，下一帧才动起来
+				_check(fx_tile.get("_stack").offset_top < 0.0, "界面：花牌生效时往上跳")
+				var fx_labels := 0
+				var fx_text := ""
+				for child in instance.get_children():
+					if child is Label and str(child.text).ends_with("倍率"):
+						fx_labels += 1
+						fx_text = str(child.text)
+				_check_eq(fx_labels, 1, "界面：花牌底下冒出一行字样")
+				_check_eq(fx_text, "+4 倍率", "界面：字样写的就是这次的加成")
+
+			# 飘分板要有个变化过程 + 花牌的效果严格按牌桌上从左到右的顺序触发：
+			# 桌上是「梨花（左）芍药（右）」，而 core 记的顺序是「底分、倍率」，
+			# 演出来必须是左边的梨花先加，然后才轮到右边的芍药
+			var keep_owned: Array = owned.duplicate()
+			owned.clear()
+			owned.append("梨花")
+			owned.append("芍药")
+			instance.set("_score_shown_serial", -1)
+			board.visible = false
+			var fx_effects: Array = [
+				{"key": "honor_base", "text": "+50 底分", "kind": "base", "delta": 50},
+				{"key": "discard_bonus", "text": "+1 倍率", "kind": "mult", "delta": 1},
+			]
+			instance.call("_play_score_sequence", 10, 1, 60, 2, fx_effects)
+			_check_eq(board.visible, true, "界面：飘分板先落下来亮出分数")
+			_check_eq(instance.get("_score_popup_base").text, "10", "界面：先亮出花牌生效前的底分")
+			_check_eq(instance.get("_score_popup_mult").visible, false,
+				"界面：一开始没有倍率，就不显示 ×N")
+			await create_timer(0.9).timeout
+			_check_eq(instance.get("_score_popup_mult").text, "× 2",
+				"界面：左边的梨花先加，倍率滚到 ×2")
+			_check_eq(instance.get("_score_popup_mult").visible, true,
+				"界面：倍率涨上来就显示出来")
+			await create_timer(0.9).timeout
+			_check_eq(instance.get("_score_popup_base").text, "60",
+				"界面：轮到右边的芍药，底分从 10 滚到 60")
+
+			# 排序规则本身：花牌行就是按买到的顺序摆的，谁在左谁先触发
+			var ordered_fx: Array = instance.call("_ordered_flower_effects", [
+				{"key": "honor_base", "text": "+10 底分", "kind": "base", "delta": 10},
+				{"key": "discard_bonus", "text": "+1 倍率", "kind": "mult", "delta": 1},
+			])
+			_check_eq(ordered_fx[0]["key"], "discard_bonus", "界面：左边的梨花先触发")
+			_check_eq(ordered_fx[1]["key"], "honor_base", "界面：右边的芍药后触发")
+			_check_eq(instance.call("_flower_table_index", "discard_bonus"), 0,
+				"界面：左边那张的序号是 0")
+			_check_eq(instance.call("_flower_table_index", "honor_base"), 1,
+				"界面：右边那张的序号是 1")
+			_check_eq(instance.call("_flower_table_index", "没这张花"), 9999,
+				"界面：牌桌上没有的花牌排到最后")
+			owned.clear()
+			owned.assign(keep_owned)
 
 			# 花牌上限 5 张
 			while owned.size() < FlowerTilesS.LIMIT:

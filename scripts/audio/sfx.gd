@@ -24,6 +24,7 @@ const ALIASES := {
 	"draw": ["fumble", "摸牌", "draw"],
 	"discard": ["drop", "打出", "discard"],
 	"impact": ["impact", "悬停"],
+	"refresh": ["refresh", "刷新"],
 	"clear": ["过关", "clear"],
 	"tenhou": ["天胡", "tenhou"],
 	"deal": ["发牌", "deal"],

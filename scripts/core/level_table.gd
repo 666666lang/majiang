@@ -5,7 +5,9 @@ extends RefCounted
 ##   目标分数：第 1 关 100 分，前三关每关 +40（140、180），
 ##              第 4~6 关每关 +60（240、300、360），
 ##              第 7 关跳到 450，7~9 关每关 +100（550、650），
-##              第 10 关再跳到 800，之后每关 +200（1000、1200 …… 第 24 关 3600）
+##              第 10 关再跳到 800，10~12 关每关 +200（1000、1200），
+##              第 13 关跳到 1500，13~15 关每关 +300（1800、2100），
+##              第 16 关跳到 2500，之后每关 +500（3000、3500 …… 第 24 关 6500）
 ##   巡数：第 1 关 10 巡，之后每 3 关 +1（第 4 关 11 巡、第 7 关 12 巡 ……）
 ##
 ## 只靠每巡打出的 10 分，第 1 关刚好是 10 巡 × 10 分 = 100 分，
@@ -17,8 +19,12 @@ const TARGET_STEP_EARLY := 40   # 第 2、3 关的步进
 const TARGET_STEP_MID := 60     # 第 4~6 关的步进
 const TARGET_STEP_LATE := 100   # 第 7~9 关的步进
 const LATE_BASE_TARGET := 450   # 第 7 关本身的目标分
-const TARGET_STEP_FINAL := 200  # 第 10 关往后每关的步进
+const TARGET_STEP_FINAL := 200  # 第 10~12 关的步进
 const FINAL_BASE_TARGET := 800  # 第 10 关本身的目标分
+const TARGET_STEP_END := 300    # 第 13~15 关的步进
+const END_BASE_TARGET := 1500   # 第 13 关本身的目标分
+const TARGET_STEP_LAST := 500   # 第 16 关往后每关的步进
+const LAST_BASE_TARGET := 2500  # 第 16 关本身的目标分
 const BASE_TOURS := 10
 const LEVELS_PER_EXTRA_TOUR := 3
 
@@ -31,7 +37,11 @@ static func target_score(level: int) -> int:
 		return BASE_TARGET + 2 * TARGET_STEP_EARLY + (l - 3) * TARGET_STEP_MID
 	if l <= 9:
 		return LATE_BASE_TARGET + (l - 7) * TARGET_STEP_LATE
-	return FINAL_BASE_TARGET + (l - 10) * TARGET_STEP_FINAL
+	if l <= 12:
+		return FINAL_BASE_TARGET + (l - 10) * TARGET_STEP_FINAL
+	if l <= 15:
+		return END_BASE_TARGET + (l - 13) * TARGET_STEP_END
+	return LAST_BASE_TARGET + (l - 16) * TARGET_STEP_LAST
 
 
 static func tours(level: int) -> int:

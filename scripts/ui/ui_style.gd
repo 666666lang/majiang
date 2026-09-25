@@ -13,6 +13,28 @@ const ACTION_RED := Color(0.784, 0.263, 0.204)
 const ACTION_SLATE := Color(0.255, 0.345, 0.322)
 const ACTION_INK := Color(0.145, 0.129, 0.075)
 const ACTION_LIGHT := Color(0.98, 0.965, 0.94)
+## 书法风的字体：行楷最像毛笔，没有就退到楷体
+const BRUSH_FONT_NAMES := [
+	"STXingkai", "华文行楷", "STKaiti", "KaiTi", "楷体", "Microsoft YaHei",
+]
+
+static var _brush_font: Font
+
+
+static func brush_font() -> Font:
+	if _brush_font == null:
+		var font := SystemFont.new()
+		font.font_names = PackedStringArray(BRUSH_FONT_NAMES)
+		font.allow_system_fallback = true
+		_brush_font = font
+	return _brush_font
+
+
+static func brush_label(text: String, font_size: int, color: Color) -> Label:
+	## 书法风的文字（按钮上的「下一关」这类）
+	var node := label(text, font_size, color)
+	node.add_theme_font_override("font", brush_font())
+	return node
 
 
 static func label(text: String, font_size: int, color: Color) -> Label:

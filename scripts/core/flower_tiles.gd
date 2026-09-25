@@ -28,6 +28,12 @@ const EFFECT_KEYS := {
 	"ziluolan": "violet",
 	"梅花": "meld_double",
 	"meihua": "meld_double",
+	"梨花": "discard_bonus",
+	"lihua": "discard_bonus",
+	"百合": "pair_bonus",
+	"baihe": "pair_bonus",
+	"芍药": "honor_base",
+	"shaoyao": "honor_base",
 }
 ## 效果代号对应的说明文字（也给商店显示用）
 const EFFECT_DESCS := {
@@ -36,6 +42,9 @@ const EFFECT_DESCS := {
 	"star": "每关额外增加 3 巡",
 	"violet": "每关开始可弃牌摸等量",
 	"meld_double": "碰、杠的倍率 ×2",
+	"discard_bonus": "打出牌 → 倍率 +1",
+	"pair_bonus": "打出后手牌里还有同样的牌 → 倍率 +4",
+	"honor_base": "手里每有一张字牌，打出的底分 +10",
 }
 
 ## 图片最长边超过这个值就先缩下来。原图动辄 1300×2000，

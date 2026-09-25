@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://6ehjetpjbyk"
-path="res://.godot/imported/荷花.png-91f6c9cd0db7122c82a5942388eb0c1c.ctex"
+uid="uid://6yjot4rlq7g5"
+path="res://.godot/imported/梨花.png-ee0dee716f7aa8d049723b274924c182.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/tiles/flowers/荷花.png"
-dest_files=["res://.godot/imported/荷花.png-91f6c9cd0db7122c82a5942388eb0c1c.ctex"]
+source_file="res://assets/tiles/flowers/梨花.png"
+dest_files=["res://.godot/imported/梨花.png-ee0dee716f7aa8d049723b274924c182.ctex"]
 
 [params]
 

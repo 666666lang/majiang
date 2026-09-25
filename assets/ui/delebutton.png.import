@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://6ehjetpjbyk"
-path="res://.godot/imported/荷花.png-91f6c9cd0db7122c82a5942388eb0c1c.ctex"
+uid="uid://bsqqkkc8d68s0"
+path="res://.godot/imported/delebutton.png-b8b30b9f2c0806d6ecf94fd3236e4211.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/tiles/flowers/荷花.png"
-dest_files=["res://.godot/imported/荷花.png-91f6c9cd0db7122c82a5942388eb0c1c.ctex"]
+source_file="res://assets/ui/delebutton.png"
+dest_files=["res://.godot/imported/delebutton.png-b8b30b9f2c0806d6ecf94fd3236e4211.ctex"]
 
 [params]
 
