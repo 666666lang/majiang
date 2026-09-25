@@ -6,8 +6,8 @@ extends RefCounted
 ## 文件名就是花牌的名字（比如 春.png → 「春」）。
 
 const DIR := "res://assets/tiles/flowers/"
-const PRICE := 10        # 普通花牌
-const EPIC_PRICE := 14   # 史诗花牌，效果更强所以更贵
+const PRICE := 12        # 普通花牌
+const EPIC_PRICE := 15   # 史诗花牌，效果更强所以更贵
 const LIMIT := 5         # 一局最多带 5 张花牌
 const EXTS := [".png", ".webp", ".jpg", ".jpeg"]
 
@@ -34,6 +34,8 @@ const EFFECT_KEYS := {
 	"baihe": "pair_bonus",
 	"芍药": "honor_base",
 	"shaoyao": "honor_base",
+	"牡丹": "honor_coin",
+	"mudan": "honor_coin",
 }
 ## 效果代号对应的说明文字（也给商店显示用）
 const EFFECT_DESCS := {
@@ -45,6 +47,7 @@ const EFFECT_DESCS := {
 	"discard_bonus": "打出牌 → 倍率 +1",
 	"pair_bonus": "打出后手牌里还有同样的牌 → 倍率 +4",
 	"honor_base": "手里每有一张字牌，打出的底分 +10",
+	"honor_coin": "过关时手里每有一张字牌 → 铜钱 +4",
 }
 
 ## 图片最长边超过这个值就先缩下来。原图动辄 1300×2000，

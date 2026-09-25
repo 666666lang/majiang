@@ -178,8 +178,10 @@ var _settle_title: Label
 var _settle_score: Label
 var _settle_target: Label
 var _settle_coin: Label
+var _settle_flower_bonus: Label
 var _settle_total: Label
 var _settle_coin_row: Control
+var _settle_flower_row: Control
 var _settle_total_row: Control
 var _settle_tours: Label
 var _settle_score_row: Control
@@ -757,6 +759,16 @@ func _show_score_popup(base: int, multiplier: int, hold: float = -1.0) -> void:
 		_score_board.position = Vector2.ZERO)
 
 
+func _hide_score_popup() -> void:
+	## 直接把飘分板收掉（商店这种整屏弹窗上来的时候用）
+	if _score_popup == null:
+		return
+	if _score_popup_tween != null and _score_popup_tween.is_valid():
+		_score_popup_tween.kill()
+	_score_popup.visible = false
+	_score_board.position = Vector2.ZERO
+
+
 func _dismiss_score_popup(hold: float = SCORE_POPUP_HOLD) -> void:
 	## 统计完停一会儿，再把牌子淡掉收起来
 	if _score_popup == null or not _score_popup.visible:
@@ -895,10 +907,16 @@ func _build_scoreboard() -> PanelContainer:
 	return panel
 
 
+## 结算板/商店那块抽屉的高度：多一行「花牌奖励」就要高一点，
+## 不然内容顶出去，按钮会被屏幕边缘切掉
+const SETTLE_PANEL_H := 590.0
+const SETTLE_PANEL_H_FLOWER := 670.0
+
+
 func _build_settlement() -> void:
 	## 过关结算板：从屏幕左侧抽屉式滑出
 	const PANEL_W := 440.0
-	const PANEL_H := 540.0   # 商店去掉标题和铜钱之后，抽屉收回刚好装得下的高度
+	const PANEL_H := SETTLE_PANEL_H   # 商店去掉标题和铜钱之后，抽屉收回刚好装得下的高度
 	var panel := PanelContainer.new()
 	panel.anchor_top = 0.5
 	panel.anchor_bottom = 0.5
@@ -942,10 +960,12 @@ func _build_settlement() -> void:
 	_settle_tours = _add_score_row(_settle_page, "剩余巡数", 36)
 	_settle_tour_bonus = _add_score_row(_settle_page, "剩余巡奖励", 36)
 	_settle_coin = _add_score_row(_settle_page, "过关奖励", 36)
+	_settle_flower_bonus = _add_score_row(_settle_page, "花牌奖励", 36)
 	_settle_total = _add_score_row(_settle_page, "铜钱总数", 36)
 	_settle_tours_row = _settle_tours.get_parent()
 	_settle_tour_bonus_row = _settle_tour_bonus.get_parent()
 	_settle_coin_row = _settle_coin.get_parent()
+	_settle_flower_row = _settle_flower_bonus.get_parent()
 	_settle_total_row = _settle_total.get_parent()
 
 	var gap := Control.new()
@@ -969,7 +989,9 @@ func _show_settlement(won: bool) -> void:
 	if won:
 		var base_reward := LevelTable.clear_reward(round_.level)
 		var tour_bonus := round_.remaining_tours()
-		var reward := base_reward + tour_bonus
+		# 花牌奖励：目前是牡丹——过关时手里每有一张字牌多给 4 钱
+		var flower_bonus := round_.flower_coin_bonus()
+		var reward := base_reward + tour_bonus + flower_bonus
 		if first_time:
 			Settings.add_coins(reward)
 		_settle_title.text = "过关！"
@@ -978,11 +1000,15 @@ func _show_settlement(won: bool) -> void:
 		_settle_tours.text = "%d 巡" % tour_bonus
 		_settle_tour_bonus.text = "+%d" % tour_bonus
 		_settle_coin.text = "+%d" % base_reward
+		_settle_flower_bonus.text = "+%d" % flower_bonus
+		_set_settle_panel_height(SETTLE_PANEL_H_FLOWER if flower_bonus > 0 else SETTLE_PANEL_H)
 		_settle_score_row.visible = false
 		_settle_target_row.visible = false
 		_settle_tours_row.visible = true
 		_settle_tour_bonus_row.visible = true
 		_settle_coin_row.visible = true
+		# 没有花牌给钱就不占这一行，免得结算板白白变长
+		_settle_flower_row.visible = flower_bonus > 0
 		_settle_total_row.visible = true
 	else:
 		_settle_title.text = "没达标"
@@ -993,6 +1019,7 @@ func _show_settlement(won: bool) -> void:
 		_settle_tours_row.visible = false
 		_settle_tour_bonus_row.visible = false
 		_settle_coin_row.visible = false
+		_settle_flower_row.visible = false
 		_settle_total_row.visible = false
 	_settle_score.text = "%d" % round_.score
 	_settle_target.text = "%d" % round_.target_score
@@ -1008,6 +1035,14 @@ func _show_settlement(won: bool) -> void:
 	tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tween.tween_property(_settle_panel, "offset_left", TARGET_LEFT, 0.32)
 	tween.parallel().tween_property(_settle_panel, "offset_right", TARGET_LEFT + PANEL_W, 0.32)
+
+
+func _set_settle_panel_height(height: float) -> void:
+	## 抽屉是上下居中挂着的，改高度就是改这两个偏移
+	if _settle_panel == null:
+		return
+	_settle_panel.offset_top = -height * 0.5
+	_settle_panel.offset_bottom = height * 0.5
 
 
 func _hide_settlement() -> void:
@@ -1779,8 +1814,11 @@ func _layout_shop() -> void:
 
 
 func _show_shop() -> void:
+	# 商店是整屏盖上去的，飘分板别再飘在上面挡着商品
+	_hide_score_popup()
 	_settle_page.visible = false
 	_shop_page.visible = true
+	_set_settle_panel_height(SETTLE_PANEL_H)   # 商店没有花牌奖励那一行，抽屉收回标准高度
 	_shop_overlay.visible = true
 	_refresh_cost = 1          # 每次进商店，刷新价从 1 钱重新起算
 	_delete_used = false       # 每次进商店可以删一次牌
@@ -2422,6 +2460,13 @@ func _setup_debug_shot() -> void:
 		round_.wall.stack_next(8, 0)   # 摸到九万
 		round_.draw_tile()
 		round_.discard(round_.hand.tiles.size())
+	elif "--coin" in args:
+		# 牡丹：过关时手里每有一张字牌多给 4 钱，看结算板上多出来的那一行
+		round_.flowers.assign(["honor_coin"])
+		_owned_flowers.assign(["牡丹"])
+		round_.hand.reset([27, 28, 29, 30, 31, 32, 33, 0, 3, 6, 9, 12, 15])   # 手里 7 张字牌
+		round_.score = round_.target_score - 10   # 再打一张就达标
+		_debug_play_one_tour()
 	elif "--violet" in args:
 		# 买了紫罗兰。再加 --pick 就直接进换牌模式，选两张看界面
 		round_.flowers.assign(["violet"])

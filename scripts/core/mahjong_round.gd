@@ -35,6 +35,7 @@ const MELD_FLOWER_MULTIPLIER := 2           # 梅花：碰、杠的倍率再翻�
 const DISCARD_FLOWER_BONUS := 1             # 梨花：每一次打出都 +1 倍率（单出就是 ×2）
 const PAIR_FLOWER_BONUS := 4                # 百合：打出去之后手上还有同款 → +4
 const HONOR_FLOWER_BASE := 10               # 芍药：手里每有一张字牌，打出的底分 +10
+const HONOR_FLOWER_COIN := 4                # 牡丹：过关时手里每有一张字牌，多给 4 钱
 const STAR_FLOWER_EXTRA_TOURS := 3          # 满天星（史诗）：每一关多给三巡
 ## 胡牌的计分倍数：全部牌的分值相加再乘下面这个数，三种胡法各自一档
 const WIN_SCORE_MULTIPLIER := 10        # 荣和（胡别人打出的牌）
@@ -226,10 +227,7 @@ func discard(index: int) -> int:
 	var base_note := ""
 	# 芍药：打完之后手里还剩几张字牌，底分就加几个 10（底分先加、之后才乘倍率）
 	if has_flower("honor_base"):
-		var honors := 0
-		for owned in hand.tiles:
-			if TileCodec.is_honor(owned):
-				honors += 1
+		var honors := hand_honor_count()
 		if honors > 0:
 			base += honors * HONOR_FLOWER_BASE
 			base_note = "（%d 张字牌，芍药底分 +%d）" % [honors, honors * HONOR_FLOWER_BASE]
@@ -501,6 +499,23 @@ func has_flower(key: String) -> bool:
 func flower_extra_tours() -> int:
 	## 花牌带来的额外巡数（目前只有满天星）
 	return STAR_FLOWER_EXTRA_TOURS if has_flower("star") else 0
+
+
+func hand_honor_count() -> int:
+	## 暗牌里有几张字牌。芍药拿它加底分、牡丹拿它加铜钱，
+	## 都只算手上没副露出去的那些。
+	var honors := 0
+	for owned in hand.tiles:
+		if TileCodec.is_honor(owned):
+			honors += 1
+	return honors
+
+
+func flower_coin_bonus() -> int:
+	## 牡丹：过关的时候，手里每有一张字牌多给 4 钱
+	if not has_flower("honor_coin"):
+		return 0
+	return hand_honor_count() * HONOR_FLOWER_COIN
 
 
 func meld_score_multiplier(base: int) -> int:

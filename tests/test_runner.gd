@@ -555,6 +555,25 @@ func _test_shop() -> void:
 	_check_eq(peony_fx.last_score_base, 60, "芍药生效后底分是 60")
 	_check_eq(peony_fx.last_score_multiplier_start, 1, "芍药不动倍率")
 
+	# 牡丹：过关的时候，手里每有一张字牌多给 4 钱
+	_check_eq(FlowerTilesS.effect_key("牡丹"), "honor_coin", "牡丹登记了「字牌换铜钱」效果")
+	_check_eq(FlowerTilesS.effect_desc("牡丹"), "过关时手里每有一张字牌 → 铜钱 +4",
+		"牡丹的说明写清了")
+	_check(not FlowerTilesS.is_epic("牡丹"), "牡丹是普通花牌")
+	_check_eq(FlowerTilesS.price("牡丹"), 12, "牡丹卖 12 钱")
+	var peony_coin := MahjongRoundS.new()
+	peony_coin.start(1, [], 1)
+	peony_coin.hand.reset(_parse_hand("19m 147p 147s 12345z"))   # 5 张字牌
+	_check_eq(peony_coin.hand_honor_count(), 5, "数得出手里 5 张字牌")
+	_check_eq(peony_coin.flower_coin_bonus(), 0, "没买牡丹就没有花牌奖励")
+	peony_coin.flowers.assign(["honor_coin"])
+	_check_eq(peony_coin.flower_coin_bonus(), 20, "5 张字牌 → 20 钱")
+	peony_coin.hand.reset(_parse_hand("19m 147p 1147s 12z"))
+	_check_eq(peony_coin.flower_coin_bonus(), 8, "手里 2 张字牌 → 8 钱")
+	# 花牌奖励不掺进「过关奖励 + 剩余巡」那笔里，结算板分开写
+	_check_eq(peony_coin.clear_coin_reward(), LevelTableS.clear_reward(1) + 9,
+		"clear_coin_reward 还是只管过关奖励 + 剩余巡")
+
 	# 梅花对杠也生效
 	var plum_kong := _rig_ready(21, _parse_hand("111m 4m 7m 1p 4p 7p 1s 4s 7s 1z 3z"))
 	plum_kong.flowers.assign(["meld_double"])
@@ -625,9 +644,9 @@ func _test_shop() -> void:
 	_check(not FlowerTilesS.is_epic("桃花"), "桃花还是普通花牌")
 	_check_eq(FlowerTilesS.rarity_name("满天星"), "史诗", "稀有度显示「史诗」")
 	_check_eq(FlowerTilesS.rarity_name("荷花"), "普通", "普通花牌显示「普通」")
-	_check_eq(FlowerTilesS.price("满天星"), 14, "史诗花牌卖 14 钱")
-	_check_eq(FlowerTilesS.price("桃花"), 10, "普通花牌还是 10 钱")
-	_check_eq(FlowerTilesS.price("荷花"), 10, "普通花牌还是 10 钱")
+	_check_eq(FlowerTilesS.price("满天星"), 15, "史诗花牌卖 15 钱")
+	_check_eq(FlowerTilesS.price("桃花"), 12, "普通花牌卖 12 钱")
+	_check_eq(FlowerTilesS.price("荷花"), 12, "普通花牌卖 12 钱")
 	_check_eq(FlowerTilesS.LIMIT, 5, "一局最多带 5 张花牌")
 	var peach_path := FlowerTilesS.path_of("桃花")
 	_check(peach_path != "" and peach_path.contains("桃花"), "按名字能找到花牌的图片")
@@ -968,7 +987,7 @@ func _test_violet_swap() -> void:
 	print("紫罗兰：每关（回合）开局换牌")
 	_check_eq(FlowerTilesS.effect_key("紫罗兰"), "violet", "紫罗兰登记了「开局换牌」效果")
 	_check(FlowerTilesS.is_epic("紫罗兰"), "紫罗兰是史诗花牌")
-	_check_eq(FlowerTilesS.price("紫罗兰"), 14, "史诗花牌卖 14 钱")
+	_check_eq(FlowerTilesS.price("紫罗兰"), 15, "史诗花牌卖 15 钱")
 
 	# 没买就没有这个能力
 	var plain := MahjongRoundS.new()
@@ -1330,6 +1349,19 @@ func _test_ui_scene_smoke() -> void:
 			instance.call("_hide_item_popup")
 			_check_eq(bubble.visible, false, "界面：气泡能收起来")
 
+			# 牡丹：过关结算板上要单独列出「花牌奖励」
+			round_ref.hand.reset(_parse_hand("19m 147p 1147s 12345z"))   # 手里 5 张字牌
+			round_ref.flowers.assign(["honor_coin"])
+			instance.call("_show_settlement", true)
+			_check_eq(instance.get("_settle_flower_row").visible, true,
+				"界面：有花牌奖励就多出一行")
+			_check_eq(instance.get("_settle_flower_bonus").text, "+20",
+				"界面：5 张字牌 → 花牌奖励 +20")
+			round_ref.flowers.clear()
+			instance.call("_show_settlement", true)
+			_check_eq(instance.get("_settle_flower_row").visible, false,
+				"界面：没有花牌奖励就不占这一行")
+
 			# 刷新按钮：第一次 1 钱，之后每次 +1 钱；重进商店重置回 1
 			settings.coins = 30
 			instance.call("_show_shop")
@@ -1397,7 +1429,7 @@ func _test_ui_scene_smoke() -> void:
 			flower_slot["flower"] = {"id": "满天星", "path": "", "epic": true}
 			flower_slot["bought"] = false
 			instance.call("_on_buy_flower_pressed", 0)
-			_check_eq(settings.coins, 36, "界面：满天星扣 14 钱")
+			_check_eq(settings.coins, 35, "界面：满天星扣 15 钱")
 			_check(instance.get("_owned_flowers").has("满天星"), "界面：买到手了")
 			instance.call("_on_restart_pressed")
 			round_ref = instance.get("round_")
