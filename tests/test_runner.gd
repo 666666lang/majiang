@@ -248,8 +248,11 @@ func _test_levels() -> void:
 	_check_eq(LevelTableS.target_score(15), 2100, "第 15 关目标 2100 分")
 	_check_eq(LevelTableS.target_score(16), 2500, "第 16 关目标 2500 分（这里跳到 +500）")
 	_check_eq(LevelTableS.target_score(17), 3000, "第 17 关目标 3000 分")
-	_check_eq(LevelTableS.target_score(23), 6000, "第 23 关目标 6000 分")
-	_check_eq(LevelTableS.target_score(24), 6500, "第 24 关目标 6500 分")
+	_check_eq(LevelTableS.target_score(18), 3500, "第 18 关目标 3500 分")
+	_check_eq(LevelTableS.target_score(19), 4500, "第 19 关目标 4500 分（这里跳到 +1000）")
+	_check_eq(LevelTableS.target_score(20), 5500, "第 20 关目标 5500 分")
+	_check_eq(LevelTableS.target_score(23), 8500, "第 23 关目标 8500 分")
+	_check_eq(LevelTableS.target_score(24), 9500, "第 24 关目标 9500 分")
 
 	_check_eq(LevelTableS.tours(1), 10, "第 1 关 10 巡")
 	_check_eq(LevelTableS.tours(3), 10, "第 3 关还是 10 巡")
@@ -286,7 +289,7 @@ func _test_levels() -> void:
 	# 巡数用完还没达标 → 本关失败
 	var failed := MahjongRoundS.new()
 	failed.start(7, [], 24)
-	_check_eq(failed.target_score, 6500, "第 24 关目标 6500 分")
+	_check_eq(failed.target_score, 9500, "第 24 关目标 9500 分")
 	_check_eq(failed.total_tours, 17, "第 24 关 17 巡")
 	# 全孤张：碰不上、杠不上、也胡不了，只能靠打出的每巡 10 分
 	failed.hand.reset(_parse_hand("147m 147p 147s 1257z 3z"))
@@ -300,7 +303,7 @@ func _test_levels() -> void:
 	_check_eq(failed.state, MahjongRoundS.State.LOST, "17 巡打完没达标 → 失败")
 	_check_eq(failed.score, 170, "只拿到打出的 17 × 10 = 170 分")
 	_check_eq(failed.tour, 17, "打满 17 巡")
-	_check_eq(failed.result_text, "17 巡打完 · 170 分（目标 6500 分）", "失败文案写清差距")
+	_check_eq(failed.result_text, "17 巡打完 · 170 分（目标 9500 分）", "失败文案写清差距")
 
 	# 换个低关口：同样的打法也能过关（第 1 关只要 100 分）
 	var passed := MahjongRoundS.new()
@@ -1386,7 +1389,11 @@ func _test_ui_scene_smoke() -> void:
 			var bubble_text: Label = instance.get("_popup_body")
 			_check_eq(bubble_text.text, str(flower_cards[0]["root"].get_meta("popup_text")),
 				"界面：气泡写的就是这张卡的效果")
-			_check(bubble_text.text != "" and not bubble_text.text.contains("钱"),
+			# 花牌说明里可能出现「铜钱 +4」这种字，所以不能简单地看有没有「钱」字，
+			# 要盯的是价格那种「12 钱」的写法
+			var bubble_id: String = str(flower_cards[0]["flower"].get("id", ""))
+			var price_text := "%d 钱" % FlowerTilesS.price(bubble_id)
+			_check(bubble_text.text != "" and not bubble_text.text.contains(price_text),
 				"界面：气泡里不写名字也不写价格")
 			instance.call("_hide_item_popup")
 			_check_eq(bubble.visible, false, "界面：气泡能收起来")
