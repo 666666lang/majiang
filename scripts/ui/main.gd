@@ -75,13 +75,20 @@ const BOARD_INK := Color(0.26, 0.15, 0.07)
 const BOARD_RED := Color(0.64, 0.18, 0.09)
 ## 计分时花牌的动画（小丑牌那种反馈）：花牌跳一下、底下冒出「+1 倍率」，
 ## 全部冒完之后飘分板才出来
-const FLOWER_FX_TEXT_SIZE := 18         # 花牌下面那行字的字号
+const GAIN_TEXT_SIZE := 18              # 「+10 底分 / +1 倍率」这类字样的字号（界面体）
 ## 多朵花之间的间隔：留够一次数字滚动（0.22 秒）的时间，不然两笔加成会挤在一起
 const FLOWER_FX_STEP := 0.3
 const FLOWER_FX_TAIL := 0.45            # 最后一朵花跳完到收起飘分板的停顿
 const FLOWER_FX_RISE := 12.0            # 字样往上飘的距离（飘太多会叠到花牌上）
 const FLOWER_FX_HOLD := 0.18            # 字样先冒出来、停留一小会儿
 const FLOWER_FX_FADE := 0.55            # 字样往上飘着淡出的时间
+## 碰 / 杠 / 胡：一张一张牌冒「+N」的节奏。牌多的时候每一步快一点，
+## 整段控制在 0.9 秒左右，不至于等太久
+const TILE_GAIN_TOTAL := 0.9
+const TILE_GAIN_STEP_MIN := 0.05
+const TILE_GAIN_STEP_MAX := 0.16
+const TILE_GAIN_TAIL := 0.3             # 最后一张加完，等数字滚到位
+const TILE_GAIN_RISE := 16.0            # 牌上方那行字往上飘的距离
 ## 飘分板的节奏：滑下来用 SCORE_POPUP_IN，统计完停 SCORE_POPUP_HOLD 再淡出。
 ## 花牌加成的数字滚动用 SCORE_ROLL_TIME
 const SCORE_POPUP_IN := 0.24
@@ -202,7 +209,9 @@ var _score_popup_tween: Tween
 var _score_shown_serial: int = 0
 var _flower_widgets: Array = []        # 牌桌上摆出来的花牌（跟 _owned_flowers 一一对应）
 var _flower_built: Array[String] = []  # 已经摆出来的花牌名单，没变就不重建
+var _row_widgets: Array = []           # 手牌那一行的牌面（手牌 + 刚摸的 + 副露，按摆放顺序）
 var _score_sequence: int = 0           # 计分动画的编号：又得一次分就把上一次的动画作废
+var _score_sequence_done: int = 0      # 已经演完的那个编号（跟上面相等就是没在演）
 var _score_base_roll: Tween            # 底分滚动（花牌加底分的时候）
 var _score_mult_roll: Tween            # 倍率滚动
 var _score_base_pulse: Tween           # 数字变化时蹦一下
@@ -466,33 +475,60 @@ func _build_score_popup() -> void:
 
 
 func _play_score_sequence(start_base: int, start_multiplier: int,
-		base: int, multiplier: int, effects: Array) -> void:
+		base: int, multiplier: int, effects: Array,
+		tiles: Array = [], kind: String = "discard") -> void:
 	## 得分的整套演出（小丑牌那套节奏）：
 	##   1. 飘分板先滑下来，亮出「花牌生效之前」的数字（比如 10）
-	##   2. 一张花牌一张花牌地点：牌跳一下、底下冒出「+N 倍率」，
+	##   2. 碰 / 杠 / 胡：攒分的那几张牌从左到右一张张冒「+10」，
+	##      底分跟着 0 → 10 → 20 → 30… 滚上去
+	##   3. 一张花牌一张花牌地点：牌跳一下、冒出「+N 倍率」，
 	##      飘分板上的数字同时滚到加上去之后的值（比如 10 → 20）
-	##   3. 全部点完，停一会儿再收起飘分板
+	##   4. 全部点完，停一会儿再收起飘分板
 	## 又一次得分会 ++_score_sequence，把上一次没演完的作废。
 	_score_sequence += 1
 	var token := _score_sequence
-	if effects.is_empty():
-		# 没有花牌要演：滑进来 → 停一会儿 → 淡出，一条时间线走完
+	# 打出的那张不算「逐张攒分」，只有碰 / 杠 / 胡才演
+	var has_tiles := not tiles.is_empty() and kind != "discard"
+	if effects.is_empty() and not has_tiles:
+		# 没什么要演的：滑进来 → 停一会儿 → 淡出，一条时间线走完
 		_show_score_popup(start_base, start_multiplier, SCORE_POPUP_HOLD)
+		_score_sequence_done = token
 		return
-	# 有花牌：先只负责把牌子滑下来，什么时候收由演完的时候说了算
+	# 有东西要演：先只负责把牌子滑下来，什么时候收由演完的时候说了算
 	_show_score_popup(start_base, start_multiplier)
-	# 花牌是这一帧刚摆到桌上的，容器的位置还没算出来——先等版面排完再量坐标，
-	# 不然「+1 倍率」会冒到屏幕左上角去
+	# 花牌和手牌都是这一帧刚摆好的，容器的位置还没算出来——先等版面排完再量坐标，
+	# 不然那些「+10 / +1 倍率」会冒到屏幕左上角去
 	await get_tree().process_frame
 	await get_tree().process_frame
 	if token != _score_sequence or not is_inside_tree():
 		return
 	# 等牌子滑到位再开始一个个加
 	await get_tree().create_timer(SCORE_POPUP_IN).timeout
-	# 严格按牌桌上从左到右的顺序演：谁摆在左边，谁先跳、先加
-	var ordered := _ordered_flower_effects(effects)
 	var shown_base := start_base
 	var shown_multiplier := start_multiplier
+	# 第一步：碰 / 杠 / 胡的那些牌，从左到右一张张冒「+N」，底分跟着涨
+	if has_tiles:
+		var widgets := _tiles_to_widgets(tiles.size(), kind)
+		var step := clampf(TILE_GAIN_TOTAL / float(tiles.size()),
+			TILE_GAIN_STEP_MIN, TILE_GAIN_STEP_MAX)
+		for i in tiles.size():
+			if token != _score_sequence or not is_inside_tree():
+				return
+			var gain := round_.tile_score(tiles[i])
+			if i < widgets.size():
+				var widget: Control = widgets[i]
+				_spawn_gain_label("+%d" % gain, widget, true, TILE_GAIN_RISE)
+			_roll_score_value(shown_base, shown_base + gain, false)
+			shown_base += gain
+			if i >= tiles.size() - 1:
+				break
+			await get_tree().create_timer(step).timeout
+		# 等最后一张的数字滚到位
+		await get_tree().create_timer(TILE_GAIN_TAIL).timeout
+		if token != _score_sequence or not is_inside_tree():
+			return
+	# 第二步：花牌，严格按牌桌上从左到右的顺序演：谁摆在左边，谁先跳、先加
+	var ordered := _ordered_flower_effects(effects)
 	for i in ordered.size():
 		if token != _score_sequence or not is_inside_tree():
 			return
@@ -516,6 +552,28 @@ func _play_score_sequence(start_base: int, start_multiplier: int,
 	_write_score_value(_score_popup_base, base, false)
 	_write_score_value(_score_popup_mult, multiplier, true)
 	_dismiss_score_popup()
+	_score_sequence_done = token
+
+
+func _score_fx_running() -> bool:
+	## 计分演出还在演吗（结算板要等它演完再出来）
+	return _score_sequence_done != _score_sequence
+
+
+func _tiles_to_widgets(count: int, kind: String) -> Array:
+	## 得分的这几张牌，对应桌面上哪几个牌面：
+	##   碰 / 杠：副露排在那一行的最后面，取末尾这几张
+	##   胡牌：整行从手牌一路到副露，顺序跟 last_score_tiles 完全一致
+	var out: Array = []
+	if count <= 0 or _row_widgets.is_empty():
+		return out
+	var start := maxi(0, _row_widgets.size() - count) if kind == "meld" else 0
+	var stop := mini(_row_widgets.size(), start + count)
+	for i in range(start, stop):
+		var widget = _row_widgets[i]
+		if is_instance_valid(widget) and widget.is_inside_tree():
+			out.append(widget)
+	return out
 
 
 func _ordered_flower_effects(effects: Array) -> Array:
@@ -603,11 +661,17 @@ func _flash_flower_effect(effect: Dictionary) -> void:
 	if tile == null:
 		return
 	tile.play_jump()
-	var text := str(effect.get("text", ""))
-	if text == "":
+	_spawn_gain_label(str(effect.get("text", "")), tile, false, FLOWER_FX_RISE)
+
+
+func _spawn_gain_label(text: String, widget: Control, above: bool, rise: float) -> void:
+	## 牌上（above）或牌下冒出一行「+10 / +1 倍率」这样的字，往上飘着淡出。
+	## 字体用界面体——加底分、加倍率的字要一眼看懂，不用书法体。
+	if text == "" or widget == null or not is_instance_valid(widget):
 		return
-	# 字样用飘分板同一个颜色（金 + 深色描边），在花牌那条底下冒出来
-	var label := UiStyle.brush_label(text, FLOWER_FX_TEXT_SIZE, GOLD)
+	if not widget.is_inside_tree():
+		return
+	var label := UiStyle.label(text, GAIN_TEXT_SIZE, GOLD)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_constant_override("outline_size", 6)
 	label.add_theme_color_override("font_outline_color", BOARD_INK)
@@ -615,24 +679,30 @@ func _flash_flower_effect(effect: Dictionary) -> void:
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(label)
 	label.size = label.get_minimum_size()
-	var anchor := tile.global_position - global_position + tile.size * 0.5
-	# 竖着排在「花牌那一整条」的下方：牌自己会往上跳，字要是贴着牌底，
-	# 跳起来的时候字就叠到牌面上了
-	var bottom := anchor.y + tile.size.y * 0.5
-	var strip := _flower_row.get_parent() as Control
-	if strip != null and strip.is_inside_tree():
-		bottom = maxf(bottom, strip.global_position.y - global_position.y + strip.size.y)
-	var start := Vector2(anchor.x - label.size.x * 0.5, bottom + 2.0)
+	var anchor := widget.global_position - global_position + widget.size * 0.5
+	var top := 0.0
+	if above:
+		# 手牌在屏幕最下面，字只能往牌上方冒
+		top = anchor.y - widget.size.y * 0.5 - label.size.y - 2.0
+	else:
+		# 花牌在屏幕最上面，字排在「花牌那一整条」的下方：牌自己会往上跳，
+		# 字要是贴着牌底，跳起来的时候就叠到牌面上了
+		top = anchor.y + widget.size.y * 0.5
+		var strip := _flower_row.get_parent() as Control
+		if strip != null and strip.is_inside_tree():
+			top = maxf(top, strip.global_position.y - global_position.y + strip.size.y)
+		top += 2.0
+	var start := Vector2(anchor.x - label.size.x * 0.5, top)
 	label.position = start
 	label.modulate.a = 0.0
 
 	var tween := create_tween()
 	tween.set_parallel(true)
 	tween.tween_property(label, "modulate:a", 1.0, 0.12)
-	tween.tween_property(label, "position:y", start.y - FLOWER_FX_RISE * 0.3, FLOWER_FX_HOLD) \
+	tween.tween_property(label, "position:y", start.y - rise * 0.3, FLOWER_FX_HOLD) \
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tween.set_parallel(false)
-	tween.tween_property(label, "position:y", start.y - FLOWER_FX_RISE, FLOWER_FX_FADE) \
+	tween.tween_property(label, "position:y", start.y - rise, FLOWER_FX_FADE) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tween.parallel().tween_property(label, "modulate:a", 0.0, FLOWER_FX_FADE)
 	tween.tween_callback(func() -> void:
@@ -1790,6 +1860,7 @@ func _start_new_round() -> void:
 	_ai_running = false
 	_draw_animated_for = -1
 	_score_shown_serial = 0
+	_score_sequence_done = _score_sequence   # 上一关没演完的计分动画别再等了
 	_hide_settlement()
 	_hide_shop()
 	round_ = MahjongRound.new()
@@ -1943,7 +2014,25 @@ func _on_concealed_kong_pressed() -> void:
 
 func _on_round_finished(won: bool, description: String) -> void:
 	## 三种胡法各配一个音效；「胡牌」给荣和，「自摸胡」给自摸和杠上开花。
+	_play_finish_sound(won, description)
+	# 计分演出还在演（碰 / 杠 / 胡要一张张冒 +10）：等它演完再掀结算板，
+	# 不然结算板一上来就把牌上那些「+10」压在底下，看着很乱
+	if _score_fx_running():
+		await _wait_score_animation()
+		if not is_inside_tree():
+			return
 	_show_settlement(won)
+
+
+func _wait_score_animation() -> void:
+	## 等计分演出演完。加个上限，万一哪一步没走完也不会一直卡着
+	var waited := 0.0
+	while _score_fx_running() and waited < 8.0 and is_inside_tree():
+		waited += 0.1
+		await get_tree().create_timer(0.1).timeout
+
+
+func _play_finish_sound(won: bool, description: String) -> void:
 	if not won:
 		return
 	if description.begins_with("荣和"):
@@ -2035,7 +2124,8 @@ func _refresh() -> void:
 	if round_.score_serial != _score_shown_serial:
 		_score_shown_serial = round_.score_serial
 		_play_score_sequence(round_.last_score_base_start, round_.last_score_multiplier_start,
-			round_.last_score_base, round_.last_score_multiplier, round_.last_flower_effects)
+			round_.last_score_base, round_.last_score_multiplier, round_.last_flower_effects,
+			round_.last_score_tiles, round_.last_score_kind)
 	# 先把按钮该显示的显示出来，再排位置：
 	# 按钮是居中摆的，位置按「这一行有多宽」算，顺序反了就会拿上一帧的宽度去居中。
 	_update_action_buttons()
@@ -2076,18 +2166,22 @@ func _rebuild_tiles() -> void:
 	for child in _tile_row.get_children():
 		_tile_row.remove_child(child)
 		child.queue_free()
+	_row_widgets.clear()
 
 	var count := round_.hand.tiles.size()
 	var win_index := -1
 	if round_.state == MahjongRound.State.WON and round_.winning_tile >= 0 and not round_.hand.has_drawn():
 		win_index = round_.hand.tiles.find(round_.winning_tile)
 	for index in count:
-		_tile_row.add_child(_make_tile(index, round_.hand.tiles[index], false, index == win_index))
+		var hand_tile := _make_tile(index, round_.hand.tiles[index], false, index == win_index)
+		_tile_row.add_child(hand_tile)
+		_row_widgets.append(hand_tile)
 
 	if round_.hand.has_drawn():
 		_add_gap(DRAWN_GAP)
 		var drawn := _make_tile(count, round_.hand.drawn_tile, true)
 		_tile_row.add_child(drawn)
+		_row_widgets.append(drawn)
 		# 刚摸进来的那张要有入场动画，但要避免每次刷新都重播
 		var showing_draw := round_.state == MahjongRound.State.DISCARDING \
 			or round_.state == MahjongRound.State.WON
@@ -2101,7 +2195,9 @@ func _rebuild_tiles() -> void:
 	for meld in round_.melds:
 		_add_gap(MELD_GAP)
 		for i in round_.meld_tile_count(meld):
-			_tile_row.add_child(_make_meld_tile(meld["kind"], meld.get("concealed", false)))
+			var meld_tile := _make_meld_tile(meld["kind"], meld.get("concealed", false))
+			_tile_row.add_child(meld_tile)
+			_row_widgets.append(meld_tile)
 
 	_fit_tile_row()
 
@@ -2374,6 +2470,21 @@ func _debug_play_one_tour() -> void:
 			round_.discard(round_.hand.tiles.size() - 1)
 
 
+func _debug_wait_score_mid() -> void:
+	## 调试用：等到计分演出演到一半（牌上已经冒字、飘分板上的数字正在滚）再截图。
+	## 开局那几帧的 delta 很不准，按固定秒数等会等偏，所以这里直接看状态。
+	var start_text := "%d" % round_.last_score_base_start
+	var guard := 0
+	while guard < 900:
+		guard += 1
+		await get_tree().process_frame
+		if _score_popup == null or not _score_popup.visible:
+			continue
+		if _score_popup_base.text != start_text:
+			break
+	await get_tree().process_frame
+
+
 func _capture_and_quit() -> void:
 	## 调试用：godot --path . -- --shot 会把界面截图存到 res://.dev/screenshot.png
 	if "--deal" in OS.get_cmdline_user_args():
@@ -2389,9 +2500,11 @@ func _capture_and_quit() -> void:
 		if "--again" in OS.get_cmdline_user_args():
 			_on_restart_pressed()  # 点「重试本关」
 			await get_tree().create_timer(0.4).timeout
-	if "--ponged" in OS.get_cmdline_user_args() or "--win" in OS.get_cmdline_user_args():
-		# 这两条路径会得分、弹飘分板：等它滑到位再截图
-		await get_tree().create_timer(0.45).timeout
+	if "--ponged" in OS.get_cmdline_user_args() or "--konged" in OS.get_cmdline_user_args() \
+			or "--ankonged" in OS.get_cmdline_user_args() \
+			or "--win" in OS.get_cmdline_user_args():
+		# 这几条路径会得分、弹飘分板：等演到「牌上冒字、底分正在滚」再截图
+		await _debug_wait_score_mid()
 	if "--fx" in OS.get_cmdline_user_args():
 		# 截在花牌起跳、飘分板上的数字正滚动的时候
 		await get_tree().create_timer(FX_SHOT_WAIT).timeout

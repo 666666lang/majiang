@@ -578,6 +578,45 @@ func _test_shop() -> void:
 		"没花牌生效时底分前后一样")
 	_check_eq(none_start.last_score_multiplier_start, none_start.last_score_multiplier,
 		"没花牌生效时倍率前后一样")
+	_check(none_start.last_score_tiles.is_empty(), "打出不演逐张攒分")
+	_check_eq(none_start.last_score_kind, "discard", "这一笔记的是「打出」")
+
+	# 碰 / 杠 / 胡要演「牌从左到右一张张冒 +10、底分跟着滚」：
+	# core 得把那几张牌按顺序记下来，起点是 0（还没开始攒）
+	var pong_tiles := _rig_ready(31, _parse_hand("11m 5m 9m 1p 4p 7p 1s 4s 7s 1z 3z 5z 7z"))
+	pong_tiles.wall.stack_next(2, 0)
+	pong_tiles.wall.stack_next(0, 1)   # 电脑打一万 → 可以碰
+	pong_tiles.wall.stack_next(26, 2)
+	pong_tiles.draw_tile()
+	pong_tiles.discard(pong_tiles.hand.tiles.size())
+	pong_tiles.opponent_discard_once()
+	_check(pong_tiles.declare_pong(), "碰得下来")
+	_check_eq(pong_tiles.last_score_kind, "meld", "碰记的是「碰杠」")
+	_check_eq(pong_tiles.last_score_tiles.size(), 3, "碰记三张牌")
+	_check_eq(pong_tiles.last_score_tiles[0], 0, "记的是碰的那一张一万")
+	_check_eq(pong_tiles.last_score_base_start, 0, "底分从 0 开始一张张攒")
+	_check_eq(pong_tiles.last_score_base, 30, "三张一万攒到 30")
+	_check_eq(pong_tiles.last_score_multiplier_start, 2, "碰本身是 ×2，不是从 1 滚")
+
+	var kong_tiles := _rig_ready(33, _parse_hand("111m 4m 7m 1p 4p 7p 1s 4s 7s 1z 3z"))
+	kong_tiles.wall.stack_next(2, 0)
+	kong_tiles.wall.stack_next(0, 1)   # 电脑打一万 → 可以杠
+	kong_tiles.wall.stack_next(26, 2)
+	kong_tiles.draw_tile()
+	kong_tiles.discard(kong_tiles.hand.tiles.size())
+	kong_tiles.opponent_discard_once()
+	_check(kong_tiles.declare_kong(), "杠得下来")
+	_check_eq(kong_tiles.last_score_tiles.size(), 4, "杠记四张牌")
+	_check_eq(kong_tiles.last_score_base_start, 0, "杠的底分也是从 0 攒")
+	_check_eq(kong_tiles.last_score_base, 40, "四张一万攒到 40")
+
+	var win_tiles := _rig_ready(35, _parse_hand("1112345678999m"))
+	win_tiles.wall.stack_next(0, 0)   # 摸到一万 → 九莲宝灯，自摸
+	win_tiles.draw_tile()
+	_check_eq(win_tiles.last_score_kind, "win", "胡牌记的是「胡牌」")
+	_check_eq(win_tiles.last_score_tiles.size(), 14, "胡牌是整手 14 张牌")
+	_check_eq(win_tiles.last_score_base_start, 0, "胡牌的底分从 0 一路加到 140")
+	_check_eq(win_tiles.last_score_base, 140, "14 张牌共 140 分")
 
 	# 满天星（史诗花牌）：售价 14 钱，每一关额外多三巡
 	_check_eq(FlowerTilesS.effect_key("满天星"), "star", "满天星登记了效果")
@@ -1427,12 +1466,16 @@ func _test_ui_scene_smoke() -> void:
 				_check(fx_tile.get("_stack").offset_top < 0.0, "界面：花牌生效时往上跳")
 				var fx_labels := 0
 				var fx_text := ""
+				var fx_brush := false
 				for child in instance.get_children():
 					if child is Label and str(child.text).ends_with("倍率"):
 						fx_labels += 1
 						fx_text = str(child.text)
+						if child.has_theme_font_override("font"):
+							fx_brush = true
 				_check_eq(fx_labels, 1, "界面：花牌底下冒出一行字样")
 				_check_eq(fx_text, "+4 倍率", "界面：字样写的就是这次的加成")
+				_check_eq(fx_brush, false, "界面：花牌那行字也用界面体，不是书法体")
 
 			# 飘分板要有个变化过程 + 花牌的效果严格按牌桌上从左到右的顺序触发：
 			# 桌上是「梨花（左）芍药（右）」，而 core 记的顺序是「底分、倍率」，
@@ -1476,6 +1519,27 @@ func _test_ui_scene_smoke() -> void:
 				"界面：牌桌上没有的花牌排到最后")
 			owned.clear()
 			owned.assign(keep_owned)
+
+			# 碰 / 杠 / 胡：逐张攒分的牌位怎么找
+			var row_widgets: Array = instance.get("_row_widgets")
+			_check(row_widgets.size() >= 13, "界面：手牌那一行的牌面都记下来了")
+			var meld_widgets: Array = instance.call("_tiles_to_widgets", 3, "meld")
+			_check_eq(meld_widgets.size(), 3, "界面：碰取末尾三张牌位")
+			_check_eq(meld_widgets[2], row_widgets[row_widgets.size() - 1],
+				"界面：碰取到的就是行尾那张（副露排在最后）")
+			var win_widgets: Array = instance.call("_tiles_to_widgets", 5, "win")
+			_check_eq(win_widgets[0], row_widgets[0], "界面：胡牌从第一张手牌数起")
+			# 加底分 / 加倍率的字用界面体，别用书法体（书法体留给「下一关」这类标题）
+			instance.call("_spawn_gain_label", "+10", row_widgets[0], true, 16.0)
+			var gain_labels := 0
+			var brush_gain := false
+			for child in instance.get_children():
+				if child is Label and str(child.text) == "+10":
+					gain_labels += 1
+					if child.has_theme_font_override("font"):
+						brush_gain = true
+			_check_eq(gain_labels, 1, "界面：牌上方冒出一行 +10")
+			_check_eq(brush_gain, false, "界面：+10 用的是界面体，不是书法体")
 
 			# 花牌上限 5 张
 			while owned.size() < FlowerTilesS.LIMIT:

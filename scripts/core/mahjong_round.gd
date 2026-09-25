@@ -91,6 +91,12 @@ var last_score_multiplier_start: int = 1
 ## [{"key": 效果代号, "text": "给玩家看的字样", "kind": "base"/"mult", "delta": 加了多少}]
 ## 界面拿它演"花牌跳一下 + 冒出 +1倍率"，跟小丑牌一个路子
 var last_flower_effects: Array[Dictionary] = []
+## 这笔得分的底分是由哪几张牌攒起来的（按桌面上从左到右的顺序）：
+## 碰是那三张、杠是那四张、胡牌是整手加副露；打出就只有打出去的那一张本身，
+## 不往这里放（打牌那一下不演「逐张攒分」）。界面按它一张一张冒「+10」。
+var last_score_tiles: Array[int] = []
+## 这笔得分是怎么来的："discard" 打出 / "meld" 碰杠 / "win" 胡牌
+var last_score_kind: String = "discard"
 ## 得分次数。界面靠它判断「又得了一次分」，跟得多少无关
 var score_serial: int = 0
 var _ai_discards_pending: int = 0
@@ -409,7 +415,7 @@ func declare_pong() -> bool:
 	var gained := each * 3 * pong_multiplier
 	_add_score_parts(each * 3, pong_multiplier, "碰 %s（%d+%d+%d）×%d%s" % [
 		TileCodec.display_name(tile), each, each, each, pong_multiplier, meld_flower_note(),
-	], meld_flower_effects(PONG_SCORE_MULTIPLIER))
+	], meld_flower_effects(PONG_SCORE_MULTIPLIER), [tile, tile, tile], "meld")
 	score_from_pongs += gained
 
 	_take_claimed_tile_from_discards()
@@ -444,7 +450,7 @@ func declare_kong() -> bool:
 	var gained := each * 4 * kong_multiplier
 	_add_score_parts(each * 4, kong_multiplier, "杠 %s（%d+%d+%d+%d）×%d%s" % [
 		TileCodec.display_name(tile), each, each, each, each, kong_multiplier, meld_flower_note(),
-	], meld_flower_effects(KONG_SCORE_MULTIPLIER))
+	], meld_flower_effects(KONG_SCORE_MULTIPLIER), [tile, tile, tile, tile], "meld")
 	score_from_kongs += gained
 
 	_take_claimed_tile_from_discards()
@@ -623,7 +629,7 @@ func declare_concealed_kong() -> bool:
 	_add_score_parts(each * 4, concealed_multiplier, "暗杠 %s（%d+%d+%d+%d）×%d%s" % [
 		TileCodec.display_name(tile), each, each, each, each, concealed_multiplier,
 		meld_flower_note(),
-	], meld_flower_effects(CONCEALED_KONG_SCORE_MULTIPLIER))
+	], meld_flower_effects(CONCEALED_KONG_SCORE_MULTIPLIER), [tile, tile, tile, tile], "meld")
 	score_from_kongs += gained
 	last_drawn = -1
 	_draw_after_kong()
@@ -676,16 +682,22 @@ func _add_score(gained: int, reason: String) -> void:
 
 
 func _add_score_parts(base: int, multiplier: int, reason: String,
-		effects: Array = []) -> void:
-	## 带倍率的得分：底数和倍率分开记，界面就能显示成「30 × 2」
+		effects: Array = [], tiles: Array = [], kind: String = "discard") -> void:
+	## 带倍率的得分：底数和倍率分开记，界面就能显示成「30 × 2」。
+	## tiles 是攒出这个底分的那几张牌（碰 3 张、杠 4 张、胡牌整手），
+	## 界面靠它一张一张冒「+10」；打出的那一张不算，打牌不演逐张攒分。
 	score += base * multiplier
 	last_score_gain = base * multiplier
 	last_score_reason = reason
 	last_score_base = base
 	last_score_multiplier = multiplier
 	last_flower_effects.assign(effects)
-	# 界面要演「数字从多少变成多少」：把花牌的加往回倒推一步，
-	# 就得到花牌生效之前的底数和倍率（没花牌生效时两者相等）
+	last_score_tiles.assign(tiles)
+	last_score_kind = kind
+	# 界面要演「数字从多少变成多少」：
+	#   花牌加的那部分往回倒推一步 → 得到花牌生效之前的底数和倍率；
+	#   底分是一张一张牌攒起来的 → 还没开始攒的时候当然是 0。
+	# （没花牌生效、也没有逐张攒分时，起点就等于终点，界面不用滚）
 	last_score_base_start = base
 	last_score_multiplier_start = multiplier
 	for effect in last_flower_effects:
@@ -694,6 +706,8 @@ func _add_score_parts(base: int, multiplier: int, reason: String,
 			last_score_base_start -= delta
 		else:
 			last_score_multiplier_start -= delta
+	for tile in last_score_tiles:
+		last_score_base_start -= tile_score(tile)
 	score_serial += 1
 
 
@@ -715,7 +729,7 @@ func _award_win_score(label: String, multiplier: int) -> void:
 	var points := base_total * multiplier
 	_add_score_parts(base_total, multiplier, "%s %d 张牌共 %d 分 × %d" % [
 		label, tiles.size(), base_total, multiplier,
-	])
+	], [], tiles, "win")
 	score_from_win += points
 
 
