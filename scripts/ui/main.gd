@@ -475,10 +475,12 @@ func _play_score_sequence(start_base: int, start_multiplier: int,
 	## 又一次得分会 ++_score_sequence，把上一次没演完的作废。
 	_score_sequence += 1
 	var token := _score_sequence
-	_show_score_popup(start_base, start_multiplier)
 	if effects.is_empty():
-		_dismiss_score_popup()
+		# 没有花牌要演：滑进来 → 停一会儿 → 淡出，一条时间线走完
+		_show_score_popup(start_base, start_multiplier, SCORE_POPUP_HOLD)
 		return
+	# 有花牌：先只负责把牌子滑下来，什么时候收由演完的时候说了算
+	_show_score_popup(start_base, start_multiplier)
 	# 花牌是这一帧刚摆到桌上的，容器的位置还没算出来——先等版面排完再量坐标，
 	# 不然「+1 倍率」会冒到屏幕左上角去
 	await get_tree().process_frame
@@ -653,9 +655,10 @@ func _flower_widget_for(key: String) -> TileWidget:
 	return null
 
 
-func _show_score_popup(base: int, multiplier: int) -> void:
-	## 飘分板从屏幕上方滑下来落位。数字的变化过程由 _play_score_sequence 驱动，
-	## 这里只负责「亮出底数 × 倍率」和进场动画（收起来看 _dismiss_score_popup）
+func _show_score_popup(base: int, multiplier: int, hold: float = -1.0) -> void:
+	## 飘分板从屏幕上方滑下来落位，亮出「底数 × 倍率」。
+	## hold < 0：只演进场，之后由 _play_score_sequence 跟着花牌往上加、演完再收
+	## hold ≥ 0：进来之后停 hold 秒自己淡出（没有花牌生效时走这条）
 	if _score_popup == null:
 		return
 	_write_score_value(_score_popup_base, base, false)
@@ -672,6 +675,16 @@ func _show_score_popup(base: int, multiplier: int) -> void:
 	_score_popup_tween.tween_property(_score_board, "position", Vector2.ZERO, SCORE_POPUP_IN) \
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	_score_popup_tween.tween_property(_score_popup, "modulate:a", 1.0, 0.16)
+	if hold < 0.0:
+		return
+	# 自己收尾：等进场滑到位再开始计停留时间（同一帧就把进场掐掉的话，
+	# 牌子会停在屏幕外、还是全透明的，等于没弹）
+	_score_popup_tween.set_parallel(false)
+	_score_popup_tween.tween_interval(hold)
+	_score_popup_tween.tween_property(_score_popup, "modulate:a", 0.0, 0.3)
+	_score_popup_tween.tween_callback(func() -> void:
+		_score_popup.visible = false
+		_score_board.position = Vector2.ZERO)
 
 
 func _dismiss_score_popup(hold: float = SCORE_POPUP_HOLD) -> void:

@@ -1224,6 +1224,11 @@ func _test_ui_scene_smoke() -> void:
 			_check_eq(instance.get("_score_popup_base").text, "10", "界面：飘分板写底数")
 			_check_eq(instance.get("_score_popup_mult").visible, false,
 				"界面：没有倍率就不显示 ×N")
+			# 只判断 visible 是不够的：进场动画被掐掉的话牌子会停在屏幕外、全透明
+			await create_timer(0.4).timeout
+			_check(board.modulate.a > 0.9, "界面：没有花牌生效时飘分板照样真的显出来")
+			_check_eq(instance.get("_score_board").position.y, 0.0,
+				"界面：没有花牌生效时飘分板也滑到位了")
 			var guard := 0
 			while guard < 900:
 				await process_frame
